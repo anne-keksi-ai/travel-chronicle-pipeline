@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,39 @@ from google import genai
 # Constants
 DEFAULT_MODEL = "gemini-3-flash-preview"
 DEFAULT_AUDIO_MIME_TYPE = "audio/webm"
+
+# Regex pattern to extract JSON from markdown code blocks
+# Matches ```json ... ``` or ``` ... ``` with optional language specifier
+_JSON_CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.MULTILINE)
+
+
+def extract_json_from_text(text: str) -> str:
+    """
+    Extract JSON content from text that may be wrapped in markdown code blocks.
+
+    Handles various formats:
+    - Plain JSON
+    - ```json ... ```
+    - ``` ... ```
+
+    Args:
+        text: Text that may contain JSON
+
+    Returns:
+        Extracted JSON string (or original text if no code block found)
+    """
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    # Try to find a code block with JSON
+    match = _JSON_CODE_BLOCK_PATTERN.search(text)
+    if match:
+        return match.group(1).strip()
+
+    # No code block found, return as-is (might already be plain JSON)
+    return text
 
 
 def format_traveler(traveler: dict[str, Any]) -> str:
@@ -166,25 +200,13 @@ Respond ONLY with valid JSON, no additional text."""
     # Parse the JSON response
     try:
         # Extract the response text
-        response_text = response.text
-        if response_text is None:
-            response_text = ""
-        response_text = response_text.strip()
+        response_text = response.text if response.text else ""
 
-        # Try to find JSON in the response (sometimes LLMs wrap it in markdown)
-        if "```json" in response_text:
-            # Extract JSON from markdown code block
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            # Extract from generic code block
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
+        # Extract JSON from potential markdown code blocks
+        json_text = extract_json_from_text(response_text)
 
         # Parse the JSON
-        result: dict[str, Any] = json.loads(response_text)
+        result: dict[str, Any] = json.loads(json_text)
 
         # Add metadata
         result["_meta"] = {"prompt": prompt, "context": context, "raw_response": response.text}

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from analyze import DEFAULT_MODEL, analyze_audio, format_traveler
+from analyze import DEFAULT_MODEL, analyze_audio, extract_json_from_text, format_traveler
 
 
 class TestAnalyzeAudio:
@@ -324,3 +324,71 @@ class TestFormatTraveler:
         """Test that extra fields in traveler dict are ignored."""
         traveler = {"name": "Bob", "age": 7, "role": "child", "id": 123}
         assert format_traveler(traveler) == "Bob (age 7)"
+
+
+class TestExtractJsonFromText:
+    """Tests for extract_json_from_text helper function."""
+
+    def test_extract_plain_json(self):
+        """Test extracting plain JSON without code blocks."""
+        text = '{"key": "value", "number": 42}'
+        result = extract_json_from_text(text)
+        assert result == '{"key": "value", "number": 42}'
+
+    def test_extract_json_from_json_code_block(self):
+        """Test extracting JSON from ```json code block."""
+        text = '```json\n{"key": "value"}\n```'
+        result = extract_json_from_text(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_json_from_generic_code_block(self):
+        """Test extracting JSON from generic ``` code block."""
+        text = '```\n{"key": "value"}\n```'
+        result = extract_json_from_text(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_json_with_surrounding_text(self):
+        """Test extracting JSON when there's text before/after the code block."""
+        text = 'Here is the result:\n```json\n{"key": "value"}\n```\nDone!'
+        result = extract_json_from_text(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_json_multiline(self):
+        """Test extracting multiline JSON."""
+        text = '''```json
+{
+  "audioType": "speech",
+  "transcript": [
+    {"speaker": "Alice", "text": "Hello"}
+  ]
+}
+```'''
+        result = extract_json_from_text(text)
+        # Parse to verify it's valid JSON
+        parsed = json.loads(result)
+        assert parsed["audioType"] == "speech"
+        assert len(parsed["transcript"]) == 1
+
+    def test_extract_json_empty_string(self):
+        """Test handling of empty string."""
+        result = extract_json_from_text("")
+        assert result == ""
+
+    def test_extract_json_whitespace_handling(self):
+        """Test that whitespace is properly stripped."""
+        text = '  ```json\n  {"key": "value"}  \n```  '
+        result = extract_json_from_text(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_json_with_nested_backticks_in_string(self):
+        """Test JSON with backticks inside string values."""
+        text = '```json\n{"code": "use `this` command"}\n```'
+        result = extract_json_from_text(text)
+        parsed = json.loads(result)
+        assert parsed["code"] == "use `this` command"
+
+    def test_extract_json_no_code_block_returns_original(self):
+        """Test that text without code blocks is returned as-is."""
+        text = 'No code block here, just plain text'
+        result = extract_json_from_text(text)
+        assert result == text
