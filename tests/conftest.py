@@ -142,6 +142,7 @@ def create_test_zip(temp_dir):
         metadata: dict[str, Any],
         audio_files: Optional[list[str]] = None,
         name: str = "test_export",
+        include_voice_reference: bool = False,
     ) -> Path:
         """
         Create a test ZIP file with given metadata and audio files.
@@ -150,6 +151,7 @@ def create_test_zip(temp_dir):
             metadata: Metadata dict to save as metadata.json
             audio_files: List of audio filenames to create (default: derived from clips)
             name: Name for the export directory
+            include_voice_reference: Whether to include voice_reference.webm
 
         Returns:
             Path to the created ZIP file
@@ -176,6 +178,10 @@ def create_test_zip(temp_dir):
             audio_dir.mkdir(exist_ok=True)
             for filename in audio_files:
                 (audio_dir / filename).write_bytes(WEBM_STUB)
+
+        # Create voice reference file if requested
+        if include_voice_reference:
+            (extract_dir / "voice_reference.webm").write_bytes(WEBM_STUB)
 
         # Create ZIP file
         zip_path: Path = temp_dir / f"{name}.zip"

@@ -15,6 +15,7 @@ from utils import extract_zip, load_metadata, save_metadata
 
 # Constants
 DEFAULT_OUTPUT_DIR = "./output"
+VOICE_REFERENCE_FILENAME = "voice_reference.webm"
 
 
 @dataclass
@@ -42,22 +43,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show what would be processed without calling Gemini API",
     )
-    parser.add_argument(
-        "--voice-reference",
-        type=str,
-        metavar="PATH",
-        help="Path to voice reference file where family members introduce themselves",
-    )
     return parser.parse_args()
 
 
-def validate_inputs(zip_path: str, voice_reference: Optional[str], dry_run: bool) -> Optional[str]:
+def validate_inputs(zip_path: str, dry_run: bool) -> Optional[str]:
     """
     Validate input files and load API key.
 
     Args:
         zip_path: Path to the ZIP file
-        voice_reference: Optional path to voice reference file
         dry_run: Whether this is a dry run (API key not required)
 
     Returns:
@@ -69,11 +63,6 @@ def validate_inputs(zip_path: str, voice_reference: Optional[str], dry_run: bool
     # Validate ZIP file exists
     if not Path(zip_path).exists():
         print(f"Error: ZIP file not found: {zip_path}")
-        sys.exit(1)
-
-    # Validate voice reference file if provided
-    if voice_reference and not Path(voice_reference).exists():
-        print(f"Error: Voice reference file not found: {voice_reference}")
         sys.exit(1)
 
     # Load environment variables and get API key
@@ -88,14 +77,28 @@ def validate_inputs(zip_path: str, voice_reference: Optional[str], dry_run: bool
     return api_key
 
 
-def print_header(dry_run: bool, voice_reference: Optional[str]) -> None:
+def detect_voice_reference(extracted_folder: str) -> Optional[Path]:
+    """
+    Check if a voice reference file exists in the extracted folder.
+
+    Args:
+        extracted_folder: Path to the extracted ZIP contents
+
+    Returns:
+        Path to voice reference file if found, None otherwise
+    """
+    voice_ref_path = Path(extracted_folder) / VOICE_REFERENCE_FILENAME
+    if voice_ref_path.exists():
+        return voice_ref_path
+    return None
+
+
+def print_header(dry_run: bool) -> None:
     """Print the pipeline header."""
     print("=" * 60)
     print("TRAVEL CHRONICLE PROCESSING PIPELINE")
     if dry_run:
         print("(DRY RUN MODE - No API calls will be made)")
-    if voice_reference:
-        print(f"Voice Reference: {Path(voice_reference).name}")
     print("=" * 60)
 
 
@@ -143,9 +146,7 @@ def print_trip_summary(
     return trip_data, clips, travelers
 
 
-def upload_voice_reference(
-    voice_reference: str, api_key: str, num_clips: int
-) -> Any:
+def upload_voice_reference(voice_reference: str, api_key: str, num_clips: int) -> Any:
     """
     Upload voice reference file to Gemini.
 
@@ -168,7 +169,9 @@ def upload_voice_reference(
 
     client = genai.Client(api_key=api_key)
     with open(voice_ref_path, "rb") as f:
-        voice_reference_file = client.files.upload(file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE})
+        voice_reference_file = client.files.upload(
+            file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE}
+        )
 
     print(f"Voice reference uploaded. File name: {voice_reference_file.name}")
     print(f"This reference will be used for all {num_clips} clips")
@@ -177,9 +180,7 @@ def upload_voice_reference(
     return voice_reference_file
 
 
-def build_clip_context(
-    clip: dict[str, Any], travelers: list[dict[str, Any]]
-) -> dict[str, Any]:
+def build_clip_context(clip: dict[str, Any], travelers: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Build context dictionary for a clip.
 
@@ -286,7 +287,7 @@ def process_clips(
     travelers: list[dict[str, Any]],
     api_key: Optional[str],
     voice_reference_file: Any,
-    voice_reference: Optional[str],
+    has_voice_reference: bool,
     verbose: bool,
     dry_run: bool,
 ) -> ProcessingStats:
@@ -299,7 +300,7 @@ def process_clips(
         travelers: List of traveler information
         api_key: Gemini API key (None for dry run)
         voice_reference_file: Optional uploaded voice reference
-        voice_reference: Optional path to voice reference file (for display)
+        has_voice_reference: Whether voice reference is available
         verbose: Whether to show verbose output
         dry_run: Whether this is a dry run
 
@@ -333,8 +334,8 @@ def process_clips(
                     f"  [DRY RUN] Context: {len(travelers)} travelers, "
                     f"location: {context.get('location', 'N/A')}"
                 )
-                if voice_reference:
-                    print(f"  [DRY RUN] Voice reference: {Path(voice_reference).name}")
+                if has_voice_reference:
+                    print(f"  [DRY RUN] Voice reference: {VOICE_REFERENCE_FILENAME}")
                 continue
 
             # Analyze the audio
@@ -393,26 +394,34 @@ def main() -> None:
     zip_path = args.zip_path
     verbose = args.verbose
     dry_run = args.dry_run
-    voice_reference = args.voice_reference
 
-    api_key = validate_inputs(zip_path, voice_reference, dry_run)
+    api_key = validate_inputs(zip_path, dry_run)
 
     try:
         output_dir = DEFAULT_OUTPUT_DIR
-        print_header(dry_run, voice_reference)
+        print_header(dry_run)
 
         # Extract ZIP and load metadata
         extracted_folder = extract_zip(zip_path, output_dir)
         metadata_path = Path(extracted_folder) / "metadata.json"
         metadata = load_metadata(metadata_path)
 
+        # Auto-detect voice reference in extracted folder
+        voice_reference_path = detect_voice_reference(extracted_folder)
+        if voice_reference_path:
+            print(f"\nVoice reference found: {VOICE_REFERENCE_FILENAME} ✓")
+        else:
+            print("\nNo voice reference (speaker ID may be less accurate)")
+
         # Print trip summary and extract data
         _, clips, travelers = print_trip_summary(metadata)
 
-        # Upload voice reference once if provided
+        # Upload voice reference once if found
         voice_reference_file = None
-        if voice_reference and not dry_run and api_key:
-            voice_reference_file = upload_voice_reference(voice_reference, api_key, len(clips))
+        if voice_reference_path and not dry_run and api_key:
+            voice_reference_file = upload_voice_reference(
+                str(voice_reference_path), api_key, len(clips)
+            )
 
         # Process all clips
         stats = process_clips(
@@ -421,7 +430,7 @@ def main() -> None:
             travelers,
             api_key,
             voice_reference_file,
-            voice_reference,
+            voice_reference_path is not None,
             verbose,
             dry_run,
         )

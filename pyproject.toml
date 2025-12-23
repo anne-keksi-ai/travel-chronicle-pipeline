@@ -50,6 +50,7 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -92,6 +93,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["_pytest.*", "pytest.*"]
 follow_imports = "skip"
+
+# Allow conftest imports in test files
+[[tool.mypy.overrides]]
+module = ["conftest"]
+ignore_missing_imports = true
 
 [tool.bandit]
 exclude_dirs = [

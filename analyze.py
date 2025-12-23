@@ -138,7 +138,7 @@ def analyze_audio(
 
         # Add story beat context
         if context.get("storyBeatContext"):
-            prompt += f"- This was recorded as a reaction to a story about: \"{context['storyBeatContext']}\"\n"
+            prompt += f'- This was recorded as a reaction to a story about: "{context["storyBeatContext"]}"\n'
 
         # Add timestamp
         if context.get("recordedAt"):

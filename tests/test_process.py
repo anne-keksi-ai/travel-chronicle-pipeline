@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from conftest import WEBM_STUB
 
 # Import needs to happen after sys.argv is set in some tests
 import process
@@ -44,29 +45,6 @@ class TestProcessMain:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "ZIP file not found" in captured.out
-
-    def test_process_validates_voice_reference_exists(
-        self, sample_zip_file, temp_dir, monkeypatch, capsys
-    ):
-        """Test that process validates voice reference file exists."""
-        nonexistent_voice = temp_dir / "nonexistent_voice.webm"
-        monkeypatch.setattr(
-            sys,
-            "argv",
-            [
-                "process.py",
-                str(sample_zip_file),
-                "--voice-reference",
-                str(nonexistent_voice),
-            ],
-        )
-
-        with pytest.raises(SystemExit) as exc_info:
-            process.main()
-
-        assert exc_info.value.code == 1
-        captured = capsys.readouterr()
-        assert "Voice reference file not found" in captured.out
 
     def test_process_requires_api_key_for_non_dry_run(
         self, sample_zip_file, monkeypatch, capsys, temp_dir
@@ -155,30 +133,29 @@ class TestProcessMain:
         assert "Alice" in captured.out or "Mom" in captured.out
 
     def test_process_with_voice_reference(
-        self, sample_zip_file, temp_dir, monkeypatch, mocker, sample_gemini_response, capsys
+        self,
+        create_test_zip,
+        sample_metadata,
+        temp_dir,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        capsys,
     ):
-        """Test processing with voice reference file."""
-        # Create a dummy voice reference file
-        voice_ref = temp_dir / "voice_ref.webm"
-        voice_ref.write_bytes(b"\x1a\x45\xdf\xa3")
+        """Test processing with auto-detected voice reference file."""
+        # Create ZIP with voice reference inside
+        zip_path = create_test_zip(
+            sample_metadata, name="test_with_voice", include_voice_reference=True
+        )
 
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
-        monkeypatch.setattr(
-            sys,
-            "argv",
-            [
-                "process.py",
-                str(sample_zip_file),
-                "--voice-reference",
-                str(voice_ref),
-            ],
-        )
+        monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
         monkeypatch.chdir(temp_dir)
 
         # Mock the genai module at import time
         mock_client = Mock()
         mock_voice_file = Mock()
-        mock_voice_file.name = "voice_ref"
+        mock_voice_file.name = "voice_reference"
         mock_client.files.upload.return_value = mock_voice_file
 
         # Import genai and patch it at the point it's used
@@ -194,9 +171,9 @@ class TestProcessMain:
 
         captured = capsys.readouterr()
 
-        # Verify voice reference upload message
+        # Verify voice reference was detected and uploaded
+        assert "Voice reference found: voice_reference.webm" in captured.out
         assert "UPLOADING VOICE REFERENCE" in captured.out
-        assert "voice_ref.webm" in captured.out
 
     def test_process_continues_on_clip_error(
         self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
@@ -443,24 +420,15 @@ class TestProcessMain:
         assert "Errors: 1" in captured.out
 
     def test_process_dry_run_with_voice_reference(
-        self, sample_zip_file, temp_dir, monkeypatch, capsys
+        self, create_test_zip, sample_metadata, temp_dir, monkeypatch, capsys
     ):
-        """Test dry-run mode with voice reference displays correctly."""
-        # Create a dummy voice reference file
-        voice_ref = temp_dir / "voice_ref.webm"
-        voice_ref.write_bytes(b"\x1a\x45\xdf\xa3")
-
-        monkeypatch.setattr(
-            sys,
-            "argv",
-            [
-                "process.py",
-                str(sample_zip_file),
-                "--dry-run",
-                "--voice-reference",
-                str(voice_ref),
-            ],
+        """Test dry-run mode with auto-detected voice reference displays correctly."""
+        # Create ZIP with voice reference inside
+        zip_path = create_test_zip(
+            sample_metadata, name="test_dry_voice", include_voice_reference=True
         )
+
+        monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path), "--dry-run"])
         monkeypatch.chdir(temp_dir)
 
         process.main()
@@ -469,10 +437,8 @@ class TestProcessMain:
 
         # Verify dry run shows voice reference info
         assert "DRY RUN MODE" in captured.out
-        assert (
-            "Voice reference: voice_ref.webm" in captured.out
-            or "[DRY RUN] Voice reference:" in captured.out
-        )
+        assert "Voice reference found: voice_reference.webm" in captured.out
+        assert "[DRY RUN] Voice reference: voice_reference.webm" in captured.out
 
     def test_process_exception_during_clip_processing(
         self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
@@ -616,31 +582,69 @@ class TestProcessingStats:
         assert stats.total_audio_events == 50
 
 
+class TestDetectVoiceReference:
+    """Tests for detect_voice_reference function."""
+
+    def test_detect_voice_reference_found(self, temp_dir):
+        """Test detection when voice_reference.webm exists."""
+        # Create directory with voice reference
+        (temp_dir / "voice_reference.webm").write_bytes(WEBM_STUB)
+
+        result = process.detect_voice_reference(str(temp_dir))
+
+        assert result is not None
+        assert result.name == "voice_reference.webm"
+
+    def test_detect_voice_reference_not_found(self, temp_dir):
+        """Test detection when voice_reference.webm doesn't exist."""
+        result = process.detect_voice_reference(str(temp_dir))
+
+        assert result is None
+
+    def test_detect_voice_reference_wrong_filename(self, temp_dir):
+        """Test detection ignores files with wrong names."""
+        # Create file with different name
+        (temp_dir / "voice.webm").write_bytes(WEBM_STUB)
+        (temp_dir / "reference.webm").write_bytes(WEBM_STUB)
+
+        result = process.detect_voice_reference(str(temp_dir))
+
+        assert result is None
+
+
+class TestNoVoiceReferenceMessage:
+    """Tests for 'No voice reference' message."""
+
+    def test_no_voice_reference_message_displayed(
+        self, sample_zip_file, monkeypatch, capsys, temp_dir
+    ):
+        """Test that 'No voice reference' message is displayed when not present."""
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"])
+        monkeypatch.chdir(temp_dir)
+
+        process.main()
+
+        captured = capsys.readouterr()
+        assert "No voice reference (speaker ID may be less accurate)" in captured.out
+
+
 class TestPrintHeader:
     """Tests for print_header function."""
 
     def test_header_normal_mode(self, capsys):
         """Test header output in normal mode."""
-        process.print_header(dry_run=False, voice_reference=None)
+        process.print_header(dry_run=False)
 
         captured = capsys.readouterr()
         assert "TRAVEL CHRONICLE PROCESSING PIPELINE" in captured.out
         assert "DRY RUN" not in captured.out
-        assert "Voice Reference" not in captured.out
 
     def test_header_dry_run_mode(self, capsys):
         """Test header output in dry run mode."""
-        process.print_header(dry_run=True, voice_reference=None)
+        process.print_header(dry_run=True)
 
         captured = capsys.readouterr()
         assert "DRY RUN MODE" in captured.out
-
-    def test_header_with_voice_reference(self, capsys):
-        """Test header output with voice reference."""
-        process.print_header(dry_run=False, voice_reference="/path/to/voice.webm")
-
-        captured = capsys.readouterr()
-        assert "Voice Reference: voice.webm" in captured.out
 
 
 class TestPrintFinalSummary:

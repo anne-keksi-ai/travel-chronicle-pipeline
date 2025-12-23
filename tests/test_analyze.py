@@ -357,14 +357,14 @@ class TestExtractJsonFromText:
 
     def test_extract_json_multiline(self):
         """Test extracting multiline JSON."""
-        text = '''```json
+        text = """```json
 {
   "audioType": "speech",
   "transcript": [
     {"speaker": "Alice", "text": "Hello"}
   ]
 }
-```'''
+```"""
         result = extract_json_from_text(text)
         # Parse to verify it's valid JSON
         parsed = json.loads(result)
@@ -391,6 +391,6 @@ class TestExtractJsonFromText:
 
     def test_extract_json_no_code_block_returns_original(self):
         """Test that text without code blocks is returned as-is."""
-        text = 'No code block here, just plain text'
+        text = "No code block here, just plain text"
         result = extract_json_from_text(text)
         assert result == text
