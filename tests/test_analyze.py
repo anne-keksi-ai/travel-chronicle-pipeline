@@ -251,6 +251,48 @@ class TestAnalyzeAudio:
         assert "Test Location" in prompt
         assert result["_meta"]["context"] == context
 
+    def test_analyze_with_starred_story_beat(self, temp_dir, mock_genai_module, mock_gemini_client):
+        """Test audio analysis with starred story beat context."""
+        audio_path = temp_dir / "test_audio.webm"
+        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
+
+        context = {
+            "storyBeatContext": "A special family moment",
+            "storyBeatStarred": True,
+        }
+
+        result = analyze_audio(str(audio_path), "fake_api_key", context=context)
+
+        # Verify prompt includes starred message
+        call_args = mock_gemini_client.models.generate_content.call_args
+        prompt = call_args[1]["contents"][-1]
+
+        assert "A special family moment" in prompt
+        assert "starred as a favorite by the family" in prompt
+        assert "audioType" in result
+
+    def test_analyze_with_unstarred_story_beat(
+        self, temp_dir, mock_genai_module, mock_gemini_client
+    ):
+        """Test audio analysis with unstarred story beat (no starred message)."""
+        audio_path = temp_dir / "test_audio.webm"
+        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
+
+        context = {
+            "storyBeatContext": "A regular story",
+            # storyBeatStarred not set or False
+        }
+
+        result = analyze_audio(str(audio_path), "fake_api_key", context=context)
+
+        # Verify prompt does NOT include starred message
+        call_args = mock_gemini_client.models.generate_content.call_args
+        prompt = call_args[1]["contents"][-1]
+
+        assert "A regular story" in prompt
+        assert "starred as a favorite" not in prompt
+        assert "audioType" in result
+
     def test_analyze_voice_reference_without_travelers(
         self, temp_dir, mock_genai_module, mock_gemini_client
     ):

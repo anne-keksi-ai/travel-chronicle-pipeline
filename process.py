@@ -27,6 +27,21 @@ class ProcessingStats:
     audio_type_counts: dict[str, int] = field(default_factory=dict)
     total_utterances: int = 0
     total_audio_events: int = 0
+    clips_with_story_beats: int = 0
+
+
+def build_story_beats_lookup(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """
+    Build a lookup dictionary for story beats by ID.
+
+    Args:
+        metadata: The metadata dictionary containing storyBeats array
+
+    Returns:
+        Dictionary mapping story beat IDs to their full data
+    """
+    story_beats = metadata.get("storyBeats", [])
+    return {beat["id"]: beat for beat in story_beats if "id" in beat}
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,12 +119,12 @@ def print_header(dry_run: bool) -> None:
 
 def print_trip_summary(
     metadata: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """
     Print trip summary and return extracted data.
 
     Returns:
-        Tuple of (trip_data, clips, travelers)
+        Tuple of (trip_data, clips, travelers, story_beats_lookup)
     """
     print("\n" + "=" * 60)
     print("TRIP SUMMARY")
@@ -129,6 +144,15 @@ def print_trip_summary(
     clips = metadata.get("clips", [])
     print(f"Number of Clips: {len(clips)}")
 
+    # Build story beats lookup and print summary
+    story_beats_lookup = build_story_beats_lookup(metadata)
+    if story_beats_lookup:
+        story_beats = list(story_beats_lookup.values())
+        starred_count = sum(1 for beat in story_beats if beat.get("starred"))
+        clips_with_beats = sum(1 for clip in clips if clip.get("storyBeatId"))
+        print(f"Story Beats: {len(story_beats)} ({starred_count} starred)")
+        print(f"Clips with Story Beats: {clips_with_beats}")
+
     # List travelers (check both 'talent' and 'travelers')
     travelers = trip_data.get("talent") or metadata.get("travelers", [])
     if travelers:
@@ -143,7 +167,7 @@ def print_trip_summary(
 
     print("=" * 60)
 
-    return trip_data, clips, travelers
+    return trip_data, clips, travelers, story_beats_lookup
 
 
 def upload_voice_reference(voice_reference: str, api_key: str, num_clips: int) -> Any:
@@ -180,13 +204,18 @@ def upload_voice_reference(voice_reference: str, api_key: str, num_clips: int) -
     return voice_reference_file
 
 
-def build_clip_context(clip: dict[str, Any], travelers: list[dict[str, Any]]) -> dict[str, Any]:
+def build_clip_context(
+    clip: dict[str, Any],
+    travelers: list[dict[str, Any]],
+    story_beats_lookup: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """
     Build context dictionary for a clip.
 
     Args:
         clip: Clip metadata
         travelers: List of traveler information
+        story_beats_lookup: Optional dictionary mapping story beat IDs to their data
 
     Returns:
         Context dictionary for audio analysis
@@ -200,10 +229,20 @@ def build_clip_context(clip: dict[str, Any], travelers: list[dict[str, Any]]) ->
         if place_name:
             context["location"] = place_name
 
-    # Add story beat context if available (handle None gracefully)
-    story_beat = clip.get("storyBeatContext")
-    if story_beat:
-        context["storyBeatContext"] = story_beat
+    # Add story beat context - check new format (storyBeatId) first, then legacy (storyBeatContext)
+    story_beat_id = clip.get("storyBeatId")
+    if story_beat_id and story_beats_lookup:
+        story_beat = story_beats_lookup.get(story_beat_id)
+        if story_beat:
+            # Include text from the story beat
+            if story_beat.get("text"):
+                context["storyBeatContext"] = story_beat["text"]
+            # Include starred status
+            if story_beat.get("starred"):
+                context["storyBeatStarred"] = True
+    elif clip.get("storyBeatContext"):
+        # Legacy format: inline storyBeatContext
+        context["storyBeatContext"] = clip["storyBeatContext"]
 
     # Add recorded timestamp if available
     recorded_at = clip.get("recordedAt")
@@ -285,6 +324,7 @@ def process_clips(
     clips: list[dict[str, Any]],
     extracted_folder: str,
     travelers: list[dict[str, Any]],
+    story_beats_lookup: dict[str, dict[str, Any]],
     api_key: Optional[str],
     voice_reference_file: Any,
     has_voice_reference: bool,
@@ -298,6 +338,7 @@ def process_clips(
         clips: List of clip metadata
         extracted_folder: Path to extracted ZIP contents
         travelers: List of traveler information
+        story_beats_lookup: Dictionary mapping story beat IDs to their data
         api_key: Gemini API key (None for dry run)
         voice_reference_file: Optional uploaded voice reference
         has_voice_reference: Whether voice reference is available
@@ -320,7 +361,22 @@ def process_clips(
 
         try:
             # Build clip-specific context
-            context = build_clip_context(clip, travelers)
+            context = build_clip_context(clip, travelers, story_beats_lookup)
+
+            # Track clips with story beats
+            if context.get("storyBeatContext"):
+                stats.clips_with_story_beats += 1
+
+            # Resolve story beat for enriched output
+            story_beat_id = clip.get("storyBeatId")
+            if story_beat_id and story_beats_lookup:
+                story_beat = story_beats_lookup.get(story_beat_id)
+                if story_beat:
+                    clip["storyBeat"] = {
+                        "id": story_beat_id,
+                        "text": story_beat.get("text"),
+                        "starred": story_beat.get("starred", False),
+                    }
 
             # Build full path to audio file
             audio_path = Path(extracted_folder) / clip_filename
@@ -334,6 +390,9 @@ def process_clips(
                     f"  [DRY RUN] Context: {len(travelers)} travelers, "
                     f"location: {context.get('location', 'N/A')}"
                 )
+                if context.get("storyBeatContext"):
+                    starred = " (starred)" if context.get("storyBeatStarred") else ""
+                    print(f"  [DRY RUN] Story beat: {context['storyBeatContext'][:50]}...{starred}")
                 if has_voice_reference:
                     print(f"  [DRY RUN] Voice reference: {VOICE_REFERENCE_FILENAME}")
                 continue
@@ -355,7 +414,12 @@ def process_clips(
     return stats
 
 
-def print_final_summary(stats: ProcessingStats, num_clips: int, dry_run: bool) -> None:
+def print_final_summary(
+    stats: ProcessingStats,
+    num_clips: int,
+    story_beats_lookup: dict[str, dict[str, Any]],
+    dry_run: bool,
+) -> None:
     """Print the final processing summary."""
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -375,6 +439,13 @@ def print_final_summary(stats: ProcessingStats, num_clips: int, dry_run: bool) -
                 [f"{count} {atype}" for atype, count in sorted(stats.audio_type_counts.items())]
             )
             print(f"  {type_summary}")
+
+        # Show story beat stats
+        if story_beats_lookup:
+            story_beats = list(story_beats_lookup.values())
+            starred_count = sum(1 for beat in story_beats if beat.get("starred"))
+            print(f"\nStory Beats: {len(story_beats)} ({starred_count} starred)")
+            print(f"  {stats.clips_with_story_beats} clips are reactions to story beats")
 
         # Show totals
         print("\nTotals:")
@@ -414,7 +485,7 @@ def main() -> None:
             print("\nNo voice reference (speaker ID may be less accurate)")
 
         # Print trip summary and extract data
-        _, clips, travelers = print_trip_summary(metadata)
+        _, clips, travelers, story_beats_lookup = print_trip_summary(metadata)
 
         # Upload voice reference once if found
         voice_reference_file = None
@@ -428,6 +499,7 @@ def main() -> None:
             clips,
             extracted_folder,
             travelers,
+            story_beats_lookup,
             api_key,
             voice_reference_file,
             voice_reference_path is not None,
@@ -444,7 +516,7 @@ def main() -> None:
             save_metadata(metadata, enriched_output_path)
 
         # Print final summary
-        print_final_summary(stats, len(clips), dry_run)
+        print_final_summary(stats, len(clips), story_beats_lookup, dry_run)
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

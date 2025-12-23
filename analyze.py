@@ -139,6 +139,8 @@ def analyze_audio(
         # Add story beat context
         if context.get("storyBeatContext"):
             prompt += f'- This was recorded as a reaction to a story about: "{context["storyBeatContext"]}"\n'
+            if context.get("storyBeatStarred"):
+                prompt += "- This story beat was starred as a favorite by the family.\n"
 
         # Add timestamp
         if context.get("recordedAt"):

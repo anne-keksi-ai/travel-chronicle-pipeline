@@ -541,6 +541,120 @@ class TestBuildClipContext:
 
         assert "location" not in context
 
+    def test_build_context_with_story_beat_id(self):
+        """Test building context with storyBeatId lookup."""
+        clip = {"storyBeatId": "beat_123"}
+        travelers: list[dict[str, str]] = []
+        story_beats_lookup = {
+            "beat_123": {"id": "beat_123", "text": "A story about adventure", "starred": False}
+        }
+
+        context = process.build_clip_context(clip, travelers, story_beats_lookup)
+
+        assert context["storyBeatContext"] == "A story about adventure"
+        assert "storyBeatStarred" not in context
+
+    def test_build_context_with_starred_story_beat(self):
+        """Test building context with starred story beat."""
+        clip = {"storyBeatId": "beat_456"}
+        travelers: list[dict[str, str]] = []
+        story_beats_lookup = {
+            "beat_456": {"id": "beat_456", "text": "A favorite story", "starred": True}
+        }
+
+        context = process.build_clip_context(clip, travelers, story_beats_lookup)
+
+        assert context["storyBeatContext"] == "A favorite story"
+        assert context["storyBeatStarred"] is True
+
+    def test_build_context_story_beat_id_not_found(self):
+        """Test building context when storyBeatId doesn't exist in lookup."""
+        clip = {"storyBeatId": "nonexistent_beat"}
+        travelers: list[dict[str, str]] = []
+        story_beats_lookup = {"other_beat": {"id": "other_beat", "text": "Other"}}
+
+        context = process.build_clip_context(clip, travelers, story_beats_lookup)
+
+        assert "storyBeatContext" not in context
+        assert "storyBeatStarred" not in context
+
+    def test_build_context_legacy_story_beat_context(self):
+        """Test building context with legacy storyBeatContext field."""
+        clip = {"storyBeatContext": "Legacy inline story"}
+        travelers: list[dict[str, str]] = []
+        story_beats_lookup: dict[str, dict[str, str]] = {}
+
+        context = process.build_clip_context(clip, travelers, story_beats_lookup)
+
+        assert context["storyBeatContext"] == "Legacy inline story"
+
+    def test_build_context_story_beat_id_takes_precedence(self):
+        """Test that storyBeatId takes precedence over legacy storyBeatContext."""
+        clip = {
+            "storyBeatId": "beat_new",
+            "storyBeatContext": "Legacy story",  # Should be ignored
+        }
+        travelers: list[dict[str, str]] = []
+        story_beats_lookup = {"beat_new": {"id": "beat_new", "text": "New story format"}}
+
+        context = process.build_clip_context(clip, travelers, story_beats_lookup)
+
+        assert context["storyBeatContext"] == "New story format"
+
+
+class TestBuildStoryBeatsLookup:
+    """Tests for build_story_beats_lookup function."""
+
+    def test_empty_metadata(self):
+        """Test with no storyBeats in metadata."""
+        metadata: dict[str, list[dict[str, str]]] = {}
+        lookup = process.build_story_beats_lookup(metadata)
+        assert lookup == {}
+
+    def test_empty_story_beats_array(self):
+        """Test with empty storyBeats array."""
+        metadata: dict[str, list[dict[str, str]]] = {"storyBeats": []}
+        lookup = process.build_story_beats_lookup(metadata)
+        assert lookup == {}
+
+    def test_single_story_beat(self):
+        """Test with single story beat."""
+        metadata = {"storyBeats": [{"id": "beat_1", "text": "Story one", "starred": True}]}
+        lookup = process.build_story_beats_lookup(metadata)
+
+        assert len(lookup) == 1
+        assert lookup["beat_1"]["text"] == "Story one"
+        assert lookup["beat_1"]["starred"] is True
+
+    def test_multiple_story_beats(self):
+        """Test with multiple story beats."""
+        metadata = {
+            "storyBeats": [
+                {"id": "beat_1", "text": "First", "starred": True},
+                {"id": "beat_2", "text": "Second", "starred": False},
+                {"id": "beat_3", "text": "Third"},
+            ]
+        }
+        lookup = process.build_story_beats_lookup(metadata)
+
+        assert len(lookup) == 3
+        assert "beat_1" in lookup
+        assert "beat_2" in lookup
+        assert "beat_3" in lookup
+
+    def test_story_beat_without_id_skipped(self):
+        """Test that story beats without id are skipped."""
+        metadata = {
+            "storyBeats": [
+                {"id": "beat_1", "text": "Has ID"},
+                {"text": "No ID"},  # Should be skipped
+            ]
+        }
+        lookup = process.build_story_beats_lookup(metadata)
+
+        assert len(lookup) == 1
+        assert "beat_1" in lookup
+
 
 class TestProcessingStats:
     """Tests for ProcessingStats dataclass."""
@@ -654,7 +768,7 @@ class TestPrintFinalSummary:
         """Test summary output in dry run mode."""
         stats = process.ProcessingStats()
 
-        process.print_final_summary(stats, num_clips=10, dry_run=True)
+        process.print_final_summary(stats, num_clips=10, story_beats_lookup={}, dry_run=True)
 
         captured = capsys.readouterr()
         assert "Dry run complete! Would process 10 clips" in captured.out
@@ -670,7 +784,7 @@ class TestPrintFinalSummary:
             total_audio_events=20,
         )
 
-        process.print_final_summary(stats, num_clips=10, dry_run=False)
+        process.print_final_summary(stats, num_clips=10, story_beats_lookup={}, dry_run=False)
 
         captured = capsys.readouterr()
         assert "Done! Processed 8/10 clips successfully" in captured.out
@@ -690,11 +804,37 @@ class TestPrintFinalSummary:
             total_audio_events=10,
         )
 
-        process.print_final_summary(stats, num_clips=5, dry_run=False)
+        process.print_final_summary(stats, num_clips=5, story_beats_lookup={}, dry_run=False)
 
         captured = capsys.readouterr()
         assert "Done! Processed 5/5 clips successfully" in captured.out
         assert "Errors:" not in captured.out
+
+    def test_summary_with_story_beats(self, capsys):
+        """Test summary output with story beats."""
+        stats = process.ProcessingStats(
+            processed_count=5,
+            error_count=0,
+            audio_type_counts={"speech": 5},
+            total_utterances=25,
+            total_audio_events=10,
+            clips_with_story_beats=3,
+        )
+        story_beats_lookup = {
+            "beat_1": {"id": "beat_1", "text": "Story 1", "starred": True},
+            "beat_2": {"id": "beat_2", "text": "Story 2", "starred": True},
+            "beat_3": {"id": "beat_3", "text": "Story 3", "starred": False},
+            "beat_4": {"id": "beat_4", "text": "Story 4", "starred": False},
+            "beat_5": {"id": "beat_5", "text": "Story 5", "starred": False},
+        }
+
+        process.print_final_summary(
+            stats, num_clips=5, story_beats_lookup=story_beats_lookup, dry_run=False
+        )
+
+        captured = capsys.readouterr()
+        assert "Story Beats: 5 (2 starred)" in captured.out
+        assert "3 clips are reactions to story beats" in captured.out
 
 
 class TestPrintTripSummary:
@@ -702,7 +842,9 @@ class TestPrintTripSummary:
 
     def test_trip_summary_new_format(self, capsys, sample_metadata):
         """Test trip summary with new metadata format."""
-        trip_data, clips, travelers = process.print_trip_summary(sample_metadata)
+        trip_data, clips, travelers, story_beats_lookup = process.print_trip_summary(
+            sample_metadata
+        )
 
         captured = capsys.readouterr()
         assert "TRIP SUMMARY" in captured.out
@@ -714,6 +856,7 @@ class TestPrintTripSummary:
         assert trip_data["id"] == "trip_test123"
         assert len(clips) == 2
         assert len(travelers) == 4
+        assert story_beats_lookup == {}  # No story beats in sample_metadata
 
     def test_trip_summary_old_format(self, capsys):
         """Test trip summary with old metadata format."""
@@ -723,7 +866,7 @@ class TestPrintTripSummary:
             "clips": [{"id": "clip_1"}],
         }
 
-        trip_data, clips, travelers = process.print_trip_summary(old_metadata)
+        trip_data, clips, travelers, story_beats_lookup = process.print_trip_summary(old_metadata)
 
         captured = capsys.readouterr()
         assert "Old Trip" in captured.out
@@ -731,12 +874,40 @@ class TestPrintTripSummary:
 
         assert len(clips) == 1
         assert travelers == [{"name": "Charlie"}]
+        assert story_beats_lookup == {}
 
     def test_trip_summary_no_travelers(self, capsys):
         """Test trip summary with no travelers."""
         metadata = {"trip": {"name": "Solo Trip"}, "clips": []}
 
-        process.print_trip_summary(metadata)
+        _, _, _, story_beats_lookup = process.print_trip_summary(metadata)
 
         captured = capsys.readouterr()
         assert "Talent/Travelers: None specified" in captured.out
+        assert story_beats_lookup == {}
+
+    def test_trip_summary_with_story_beats(self, capsys):
+        """Test trip summary with story beats."""
+        metadata = {
+            "trip": {"name": "Story Trip"},
+            "clips": [
+                {"id": "clip_1", "storyBeatId": "beat_1"},
+                {"id": "clip_2", "storyBeatId": "beat_2"},
+                {"id": "clip_3"},  # No story beat
+            ],
+            "storyBeats": [
+                {"id": "beat_1", "text": "First story", "starred": True},
+                {"id": "beat_2", "text": "Second story", "starred": False},
+                {"id": "beat_3", "text": "Unused story", "starred": True},
+            ],
+        }
+
+        _, clips, _, story_beats_lookup = process.print_trip_summary(metadata)
+
+        captured = capsys.readouterr()
+        assert "Story Beats: 3 (2 starred)" in captured.out
+        assert "Clips with Story Beats: 2" in captured.out
+
+        assert len(story_beats_lookup) == 3
+        assert story_beats_lookup["beat_1"]["text"] == "First story"
+        assert story_beats_lookup["beat_1"]["starred"] is True
