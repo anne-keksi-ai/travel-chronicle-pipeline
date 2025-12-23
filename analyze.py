@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # Travel Chronicle - Audio Analysis
 
+import json
 import os
 import sys
-import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+
 
 def analyze_audio(audio_path: str, api_key: str, context: dict = None, voice_reference_file=None) -> dict:
     """

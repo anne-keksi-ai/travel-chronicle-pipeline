@@ -38,9 +38,33 @@ travel-chronicle-pipeline/
 curl -LsSf https://astral.sh/uv/install.sh | sh  # macOS/Linux
 # OR: brew install uv
 
-# Install dependencies
+# Install dependencies (including dev dependencies like ruff)
 uv sync
 ```
+
+## Development Workflow
+
+### Code Quality
+
+This project uses **[ruff](https://docs.astral.sh/ruff/)** for linting and formatting.
+
+**Run after making changes:**
+
+```bash
+# Check code for issues
+uv run ruff check .
+
+# Auto-fix issues where possible
+uv run ruff check --fix .
+
+# Format code
+uv run ruff format .
+
+# Run both check and format together
+uv run ruff check --fix . && uv run ruff format .
+```
+
+Configuration is in `pyproject.toml` under `[tool.ruff]`.
 
 ## Environment Variables
 

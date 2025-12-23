@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # Travel Chronicle - Audio Processing Pipeline
 
-import sys
-import os
 import argparse
+import os
+import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
-from utils import extract_zip, load_metadata, save_metadata
+
 from analyze import analyze_audio
+from utils import extract_zip, load_metadata, save_metadata
 
 
 def main():
@@ -93,7 +95,7 @@ def main():
         # List travelers (check both 'talent' and 'travelers')
         travelers = trip_data.get('talent') or metadata.get('travelers', [])
         if travelers:
-            print(f"\nTalent/Travelers:")
+            print("\nTalent/Travelers:")
             for traveler in travelers:
                 if 'age' in traveler:
                     print(f"  - {traveler['name']} (age {traveler['age']})")
@@ -215,7 +217,7 @@ def main():
 
                     # Show verbose output if requested
                     if verbose and result.get('transcript'):
-                        print(f"\n  Transcript:")
+                        print("\n  Transcript:")
                         for utterance in result['transcript']:
                             speaker = utterance.get('speaker', 'Unknown')
                             text = utterance.get('text', '')
@@ -258,7 +260,7 @@ def main():
                 print(f"  {type_summary}")
 
             # Show totals
-            print(f"\nTotals:")
+            print("\nTotals:")
             print(f"  {total_utterances} utterances transcribed")
             print(f"  {total_audio_events} audio events detected")
 

@@ -1,9 +1,9 @@
 # Travel Chronicle - Utility Functions
 
-import zipfile
 import json
+import zipfile
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 
 def extract_zip(zip_path: str, output_dir: str) -> str:
@@ -43,7 +43,7 @@ def extract_zip(zip_path: str, output_dir: str) -> str:
     return extracted_folder
 
 
-def load_metadata(metadata_path: str) -> Dict[str, Any]:
+def load_metadata(metadata_path: str) -> dict[str, Any]:
     """
     Load and parse metadata.json file.
 
@@ -59,13 +59,13 @@ def load_metadata(metadata_path: str) -> Dict[str, Any]:
 
     print(f"Loading metadata from {metadata_file.name}...")
 
-    with open(metadata_file, 'r', encoding='utf-8') as f:
+    with open(metadata_file, encoding='utf-8') as f:
         metadata = json.load(f)
 
     return metadata
 
 
-def save_metadata(metadata: Dict[str, Any], output_path: str) -> None:
+def save_metadata(metadata: dict[str, Any], output_path: str) -> None:
     """
     Save metadata dictionary as formatted JSON.
 
