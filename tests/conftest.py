@@ -2,8 +2,14 @@
 
 import json
 import zipfile
+from pathlib import Path
+from typing import Any, Optional
 
 import pytest
+
+# Constant: Minimal WebM file header (EBML + Segment markers)
+# This is a valid file signature but not playable audio
+WEBM_STUB = b"\x1a\x45\xdf\xa3\xa3\x42\x86\x81\x01\x42\xf7\x81\x01\x42\xf2\x81\x04"
 
 
 @pytest.fixture
@@ -109,10 +115,7 @@ def sample_zip_file(temp_dir, sample_metadata):
     # Create minimal WebM files (just headers, not real audio)
     for i in range(1, 3):
         audio_file = audio_dir / f"clip_{i:03d}.webm"
-        # Write minimal WebM header (EBML + Segment markers)
-        audio_file.write_bytes(
-            b"\x1a\x45\xdf\xa3\xa3\x42\x86\x81\x01\x42\xf7\x81\x01\x42\xf2\x81\x04"
-        )
+        audio_file.write_bytes(WEBM_STUB)
 
     # Create ZIP file
     zip_path = temp_dir / "test_export.zip"
@@ -123,6 +126,76 @@ def sample_zip_file(temp_dir, sample_metadata):
                 zipf.write(file_path, arcname)
 
     return zip_path
+
+
+@pytest.fixture
+def create_test_zip(temp_dir):
+    """
+    Factory fixture for creating test ZIP files with custom metadata.
+
+    Usage:
+        def test_something(create_test_zip):
+            zip_path = create_test_zip(metadata, audio_files=["clip1.webm"])
+    """
+
+    def _create_zip(
+        metadata: dict[str, Any],
+        audio_files: Optional[list[str]] = None,
+        name: str = "test_export",
+    ) -> Path:
+        """
+        Create a test ZIP file with given metadata and audio files.
+
+        Args:
+            metadata: Metadata dict to save as metadata.json
+            audio_files: List of audio filenames to create (default: derived from clips)
+            name: Name for the export directory
+
+        Returns:
+            Path to the created ZIP file
+        """
+        extract_dir: Path = temp_dir / name
+        extract_dir.mkdir(exist_ok=True)
+
+        # Create metadata.json
+        with open(extract_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        # Determine audio files to create
+        if audio_files is None:
+            # Extract from clips in metadata
+            audio_files = [
+                clip.get("filename", "").replace("audio/", "")
+                for clip in metadata.get("clips", [])
+                if clip.get("filename")
+            ]
+
+        # Create audio directory with stub files
+        if audio_files:
+            audio_dir = extract_dir / "audio"
+            audio_dir.mkdir(exist_ok=True)
+            for filename in audio_files:
+                (audio_dir / filename).write_bytes(WEBM_STUB)
+
+        # Create ZIP file
+        zip_path: Path = temp_dir / f"{name}.zip"
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for file_path in extract_dir.rglob("*"):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(extract_dir.parent)
+                    zipf.write(file_path, arcname)
+
+        return zip_path
+
+    return _create_zip
+
+
+@pytest.fixture
+def webm_stub_file(temp_dir):
+    """Create a temporary WebM stub file and return its path."""
+    audio_path = temp_dir / "test_audio.webm"
+    audio_path.write_bytes(WEBM_STUB)
+    return audio_path
 
 
 @pytest.fixture
