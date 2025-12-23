@@ -9,3 +9,8 @@ venv/
 test_audio*/
 *.zip
 *.webm
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/

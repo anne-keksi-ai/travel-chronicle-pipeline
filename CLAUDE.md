@@ -21,6 +21,11 @@ travel-chronicle-pipeline/
 ├── process.py              # Main entry point
 ├── analyze.py              # Gemini audio analysis
 ├── utils.py                # Helper functions
+├── tests/                  # Test suite
+│   ├── conftest.py         # Shared test fixtures
+│   ├── test_utils.py       # Tests for utils.py
+│   ├── test_analyze.py     # Tests for analyze.py
+│   └── test_process.py     # Tests for process.py
 ├── pyproject.toml          # Project config & dependencies (uv)
 ├── uv.lock                 # Locked dependency versions
 ├── requirements.txt        # Legacy (deprecated, use uv)
@@ -65,6 +70,53 @@ uv run ruff check --fix . && uv run ruff format .
 ```
 
 Configuration is in `pyproject.toml` under `[tool.ruff]`.
+
+### Testing
+
+This project uses **[pytest](https://docs.pytest.org/)** for testing with comprehensive test coverage.
+
+**Run after making changes:**
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run tests with verbose output
+uv run pytest -v
+
+# Run tests with coverage report
+uv run pytest --cov=. --cov-report=term-missing
+
+# Run specific test file
+uv run pytest tests/test_utils.py
+
+# Run specific test function
+uv run pytest tests/test_utils.py::TestExtractZip::test_extract_valid_zip
+
+# Run tests excluding slow ones
+uv run pytest -m "not slow"
+
+# Run only integration tests
+uv run pytest -m integration
+
+# Run tests in parallel (faster)
+uv run pytest -n auto  # requires pytest-xdist
+```
+
+**Test Structure:**
+
+```
+tests/
+├── conftest.py              # Shared fixtures and test setup
+├── test_utils.py            # Tests for utils.py (ZIP, JSON handling)
+├── test_analyze.py          # Tests for analyze.py (audio analysis)
+└── test_process.py          # Tests for process.py (main pipeline)
+```
+
+**Coverage:**
+- Coverage reports are generated in HTML format at `htmlcov/index.html`
+- Target: >80% code coverage
+- Configuration is in `pyproject.toml` under `[tool.pytest.ini_options]`
 
 ## Environment Variables
 
