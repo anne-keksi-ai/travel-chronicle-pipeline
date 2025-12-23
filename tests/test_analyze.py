@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from analyze import DEFAULT_MODEL, analyze_audio
+from analyze import DEFAULT_MODEL, analyze_audio, format_traveler
 
 
 class TestAnalyzeAudio:
@@ -295,3 +295,32 @@ class TestAnalyzeAudio:
         # Should handle None gracefully and return error
         assert "error" in result
         assert result["error"] == "Failed to parse JSON response"
+
+
+class TestFormatTraveler:
+    """Tests for format_traveler helper function."""
+
+    def test_format_traveler_with_age(self):
+        """Test formatting a traveler with age."""
+        traveler = {"name": "Alice", "age": 9}
+        assert format_traveler(traveler) == "Alice (age 9)"
+
+    def test_format_traveler_without_age(self):
+        """Test formatting a traveler without age."""
+        traveler = {"name": "Mom"}
+        assert format_traveler(traveler) == "Mom"
+
+    def test_format_traveler_with_zero_age(self):
+        """Test formatting a traveler with age 0 (infant)."""
+        traveler = {"name": "Baby", "age": 0}
+        assert format_traveler(traveler) == "Baby (age 0)"
+
+    def test_format_traveler_preserves_name_exactly(self):
+        """Test that special characters in names are preserved."""
+        traveler = {"name": "José María", "age": 45}
+        assert format_traveler(traveler) == "José María (age 45)"
+
+    def test_format_traveler_with_extra_fields(self):
+        """Test that extra fields in traveler dict are ignored."""
+        traveler = {"name": "Bob", "age": 7, "role": "child", "id": 123}
+        assert format_traveler(traveler) == "Bob (age 7)"

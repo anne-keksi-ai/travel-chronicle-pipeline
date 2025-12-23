@@ -16,6 +16,22 @@ DEFAULT_MODEL = "gemini-3-flash-preview"
 DEFAULT_AUDIO_MIME_TYPE = "audio/webm"
 
 
+def format_traveler(traveler: dict[str, Any]) -> str:
+    """
+    Format a traveler dict as a display string.
+
+    Args:
+        traveler: Dict with 'name' and optional 'age' keys
+
+    Returns:
+        Formatted string like "Alice (age 9)" or "Mom"
+    """
+    name = str(traveler["name"])
+    if "age" in traveler:
+        return f"{name} (age {traveler['age']})"
+    return name
+
+
 def analyze_audio(
     audio_path: str,
     api_key: str,
@@ -66,9 +82,7 @@ def analyze_audio(
         if context and context.get("travelers"):
             prompt += ":\n"
             for traveler in context["travelers"]:
-                name = traveler["name"]
-                age_str = f" (age {traveler['age']})" if "age" in traveler else ""
-                prompt += f"- How {name}{age_str} sounds\n"
+                prompt += f"- How {format_traveler(traveler)} sounds\n"
         else:
             prompt += ".\n"
 
@@ -81,12 +95,7 @@ def analyze_audio(
 
         # Add traveler information
         if context.get("travelers"):
-            travelers_str = ", ".join(
-                [
-                    f"{t['name']} (age {t['age']})" if "age" in t else t["name"]
-                    for t in context["travelers"]
-                ]
-            )
+            travelers_str = ", ".join(format_traveler(t) for t in context["travelers"])
             prompt += f"- Travelers: {travelers_str}\n"
 
         # Add location
