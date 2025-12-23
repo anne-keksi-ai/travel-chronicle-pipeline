@@ -1,18 +1,22 @@
 # Travel Chronicle - Utility Functions
 
 import json
+import os
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
+
+# Type alias for path-like arguments
+PathLike = Union[str, os.PathLike[str]]
 
 
-def extract_zip(zip_path: str, output_dir: str) -> str:
+def extract_zip(zip_path: PathLike, output_dir: PathLike) -> str:
     """
     Extract a ZIP file to the specified directory.
 
     Args:
-        zip_path: Path to the ZIP file
-        output_dir: Directory where the ZIP should be extracted
+        zip_path: Path to the ZIP file (str or Path)
+        output_dir: Directory where the ZIP should be extracted (str or Path)
 
     Returns:
         str: Path to the extracted folder
@@ -43,12 +47,12 @@ def extract_zip(zip_path: str, output_dir: str) -> str:
     return extracted_folder
 
 
-def load_metadata(metadata_path: str) -> dict[str, Any]:
+def load_metadata(metadata_path: PathLike) -> dict[str, Any]:
     """
     Load and parse metadata.json file.
 
     Args:
-        metadata_path: Path to the metadata.json file
+        metadata_path: Path to the metadata.json file (str or Path)
 
     Returns:
         dict: Parsed metadata
@@ -65,13 +69,13 @@ def load_metadata(metadata_path: str) -> dict[str, Any]:
     return metadata
 
 
-def save_metadata(metadata: dict[str, Any], output_path: str) -> None:
+def save_metadata(metadata: dict[str, Any], output_path: PathLike) -> None:
     """
     Save metadata dictionary as formatted JSON.
 
     Args:
         metadata: Dictionary to save
-        output_path: Path where the JSON file should be saved
+        output_path: Path where the JSON file should be saved (str or Path)
     """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)

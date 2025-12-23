@@ -205,3 +205,35 @@ class TestSaveMetadata:
         assert saved_data == new_data
         assert saved_data["test"] == "updated"
         assert "new_field" in saved_data
+
+
+class TestPathLikeSupport:
+    """Tests verifying that utility functions accept Path objects."""
+
+    def test_extract_zip_accepts_path_objects(self, sample_zip_file, temp_dir):
+        """Test that extract_zip accepts Path objects, not just strings."""
+        # Both arguments are Path objects
+        output_dir = temp_dir / "path_output"
+        result = extract_zip(sample_zip_file, output_dir)
+
+        assert result is not None
+        assert Path(result).exists()
+
+    def test_load_metadata_accepts_path_object(self, sample_metadata_file):
+        """Test that load_metadata accepts Path objects."""
+        # sample_metadata_file is already a Path object
+        result = load_metadata(sample_metadata_file)
+
+        assert "trip" in result
+
+    def test_save_metadata_accepts_path_object(self, temp_dir, sample_metadata):
+        """Test that save_metadata accepts Path objects."""
+        output_path = temp_dir / "path_output.json"
+        save_metadata(sample_metadata, output_path)
+
+        assert output_path.exists()
+
+        # Verify content
+        with open(output_path, encoding="utf-8") as f:
+            saved_data = json.load(f)
+        assert saved_data == sample_metadata

@@ -404,7 +404,7 @@ def main() -> None:
         # Extract ZIP and load metadata
         extracted_folder = extract_zip(zip_path, output_dir)
         metadata_path = Path(extracted_folder) / "metadata.json"
-        metadata = load_metadata(str(metadata_path))
+        metadata = load_metadata(metadata_path)
 
         # Print trip summary and extract data
         _, clips, travelers = print_trip_summary(metadata)
@@ -432,7 +432,7 @@ def main() -> None:
             print("SAVING RESULTS")
             print("=" * 60)
             enriched_output_path = Path(output_dir) / "enriched_metadata.json"
-            save_metadata(metadata, str(enriched_output_path))
+            save_metadata(metadata, enriched_output_path)
 
         # Print final summary
         print_final_summary(stats, len(clips), dry_run)
