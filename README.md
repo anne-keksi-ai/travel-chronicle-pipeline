@@ -2,8 +2,8 @@
 
 AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
 
-[![Tests](https://img.shields.io/badge/tests-49%20passing-success)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-success)](htmlcov/)
+[![Tests](https://img.shields.io/badge/tests-85%20passing-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-97%25-success)](htmlcov/)
 [![Type Checked](https://img.shields.io/badge/mypy-passing-success)](pyproject.toml)
 [![Security](https://img.shields.io/badge/bandit-passing-success)](pyproject.toml)
 [![Code Style](https://img.shields.io/badge/code%20style-ruff-000000)](https://docs.astral.sh/ruff/)
@@ -11,7 +11,7 @@ AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Au
 ## Features
 
 - 🎯 **Context-Aware Transcription**: Uses family member names and trip context for accurate speaker identification
-- 🗣️ **Voice Reference Support**: Upload a voice reference file where family members introduce themselves for even better accuracy
+- 🗣️ **Voice Reference Support**: Automatically uses `voice_reference.webm` from export for better speaker identification
 - 🌍 **Multilingual Support**: Handles multiple languages (e.g., English, Finnish) in the same audio clip
 - ⏱️ **Timestamped Transcripts**: Every utterance includes precise timestamps
 - 🎭 **Emotional Tone Analysis**: Detects the mood and feeling of each clip (happy, calm, excited, etc.)
@@ -82,10 +82,12 @@ uv run python process.py /path/to/export.zip
 
 ### With Voice Reference
 
-For improved speaker identification, provide a voice reference file where each family member introduces themselves:
+For improved speaker identification, include a `voice_reference.webm` file in your Travel Chronicle export. The pipeline automatically detects and uses it:
 
 ```bash
-uv run python process.py /path/to/export.zip --voice-reference voice_intro.webm
+# Voice reference is auto-detected if present in the ZIP
+uv run python process.py /path/to/export.zip
+# Output: "Voice reference found: voice_reference.webm ✓"
 ```
 
 ### Verbose Mode
@@ -107,7 +109,7 @@ uv run python process.py /path/to/export.zip --dry-run
 ### Combined Options
 
 ```bash
-uv run python process.py /path/to/export.zip --voice-reference voice.webm --verbose
+uv run python process.py /path/to/export.zip --verbose --dry-run
 ```
 
 ## Command-Line Options
@@ -115,10 +117,11 @@ uv run python process.py /path/to/export.zip --voice-reference voice.webm --verb
 | Option | Description |
 |--------|-------------|
 | `zip_path` | Path to the Travel Chronicle export ZIP file (required) |
-| `--voice-reference PATH` | Path to voice reference audio file for better speaker identification |
 | `--verbose`, `-v` | Show full transcripts for each clip during processing |
 | `--dry-run` | Preview processing without making API calls |
 | `--help`, `-h` | Show help message |
+
+**Note:** Voice reference (`voice_reference.webm`) is automatically detected from the export ZIP file.
 
 ## Output
 
@@ -165,10 +168,10 @@ Totals:
 ## Example Workflow
 
 1. **Export your Travel Chronicle trip** to a ZIP file
-2. **(Optional) Record a voice reference** where each family member says their name
+2. **(Optional) Include a voice reference** (`voice_reference.webm`) in the export where each family member says their name
 3. **Run the pipeline:**
    ```bash
-   uv run python process.py my_trip_export.zip --voice-reference voices.webm --verbose
+   uv run python process.py my_trip_export.zip --verbose
    ```
 4. **Review the results** in `output/enriched_metadata.json`
 
@@ -179,7 +182,7 @@ travel-chronicle-pipeline/
 ├── analyze.py              # Core audio analysis with Gemini API
 ├── process.py              # Main pipeline for batch processing
 ├── utils.py                # Helper functions (ZIP extraction, JSON handling)
-├── tests/                  # Comprehensive test suite (49 tests, 96% coverage)
+├── tests/                  # Comprehensive test suite (85 tests, 97% coverage)
 │   ├── conftest.py         # Shared test fixtures
 │   ├── test_analyze.py     # Tests for audio analysis
 │   ├── test_process.py     # Tests for main pipeline
@@ -199,28 +202,35 @@ travel-chronicle-pipeline/
 
 1. **Extract** the Travel Chronicle export ZIP
 2. **Load** metadata about the trip and travelers
-3. **Upload** voice reference (if provided) to Gemini once
-4. **Process** each audio clip:
+3. **Detect** voice reference (`voice_reference.webm`) if present in export
+4. **Upload** voice reference to Gemini once (if found)
+5. **Process** each audio clip:
    - Upload audio file to Gemini
    - Send context-aware prompt with traveler info, location, timestamps
    - Receive structured JSON analysis
    - Parse and validate results
-5. **Save** enriched metadata with all analysis results
+6. **Save** enriched metadata with all analysis results
 
 ## Voice Reference Best Practices
 
-For optimal speaker identification, create a voice reference where each family member:
+The pipeline automatically detects `voice_reference.webm` in your Travel Chronicle export. For optimal speaker identification, record a voice reference where each family member:
 - Says their name clearly
 - Speaks for 2-3 seconds
 - Uses their natural voice
 
-Example:
+Save this recording as `voice_reference.webm` and include it in your export ZIP file at the root level (not in a subdirectory).
+
+Example audio content:
 ```
 "Hi, I'm Ellen, I'm 8 years old."
 "This is Alina, age 9."
 "I'm Anne, the mom."
 "And I'm Geoff, the dad."
 ```
+
+When the pipeline runs, you'll see:
+- `Voice reference found: voice_reference.webm ✓` - voice reference detected and will be used
+- `No voice reference (speaker ID may be less accurate)` - no voice reference found
 
 ## API Costs
 
@@ -245,7 +255,7 @@ This project uses comprehensive defensive programming tools to ensure code quali
 
 ### Running Tests
 
-The project includes a comprehensive test suite with 96% code coverage:
+The project includes a comprehensive test suite with 97% code coverage:
 
 ```bash
 # Run all tests
@@ -312,11 +322,14 @@ Error: ZIP file not found: export.zip
 ```
 **Solution:** Provide the full path to your ZIP file
 
-### Voice Reference Issues
+### Voice Reference Not Detected
 ```
-Error: Voice reference file not found
+No voice reference (speaker ID may be less accurate)
 ```
-**Solution:** Ensure the voice reference file path is correct and the file exists
+**Solution:** Ensure your `voice_reference.webm` file is:
+- Named exactly `voice_reference.webm`
+- Located at the root of your export ZIP (not in a subdirectory)
+- Included in the ZIP before extraction
 
 ## Contributing
 
