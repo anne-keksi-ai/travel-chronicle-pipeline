@@ -96,10 +96,11 @@ class TestAnalyzeAudio:
         # Verify result is valid
         assert "audioType" in result
 
-    def test_analyze_with_travelers_no_age(self, temp_dir, mock_genai_module, mock_gemini_client):
+    def test_analyze_with_travelers_no_age(
+        self, temp_dir, mock_genai_module, mock_gemini_client, webm_stub_file
+    ):
         """Test context with travelers without age field."""
-        audio_path = temp_dir / "test_audio.webm"
-        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
+        audio_path = webm_stub_file
 
         context = {"travelers": [{"name": "Mom"}, {"name": "Dad"}]}
 
@@ -111,8 +112,9 @@ class TestAnalyzeAudio:
 
         assert "Mom" in prompt
         assert "Dad" in prompt
-        # Should not have age-related text for travelers without age
-        assert "age" not in prompt or "age" in prompt.lower()
+        # Travelers without age should not have "(age X)" appended
+        assert "Mom (age" not in prompt
+        assert "Dad (age" not in prompt
 
         # Verify result is valid
         assert "audioType" in result
