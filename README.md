@@ -2,6 +2,12 @@
 
 AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
 
+[![Tests](https://img.shields.io/badge/tests-43%20passing-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-success)](htmlcov/)
+[![Type Checked](https://img.shields.io/badge/mypy-passing-success)](pyproject.toml)
+[![Security](https://img.shields.io/badge/bandit-passing-success)](pyproject.toml)
+[![Code Style](https://img.shields.io/badge/code%20style-ruff-000000)](https://docs.astral.sh/ruff/)
+
 ## Features
 
 - 🎯 **Context-Aware Transcription**: Uses family member names and trip context for accurate speaker identification
@@ -170,15 +176,21 @@ Totals:
 
 ```
 travel-chronicle-pipeline/
-├── analyze.py          # Core audio analysis with Gemini API
-├── process.py          # Main pipeline for batch processing
-├── utils.py            # Helper functions (ZIP extraction, JSON handling)
-├── pyproject.toml      # Project metadata and dependencies (uv)
-├── uv.lock            # Locked dependency versions
-├── requirements.txt    # Legacy pip requirements (deprecated, use uv)
-├── .env.example        # Environment variable template
-├── .gitignore         # Git ignore patterns
-└── README.md          # This file
+├── analyze.py              # Core audio analysis with Gemini API
+├── process.py              # Main pipeline for batch processing
+├── utils.py                # Helper functions (ZIP extraction, JSON handling)
+├── tests/                  # Comprehensive test suite (43 tests, 95% coverage)
+│   ├── conftest.py         # Shared test fixtures
+│   ├── test_analyze.py     # Tests for audio analysis
+│   ├── test_process.py     # Tests for main pipeline
+│   └── test_utils.py       # Tests for utility functions
+├── pyproject.toml          # Project metadata and dependencies (uv)
+├── uv.lock                 # Locked dependency versions
+├── .pre-commit-config.yaml # Pre-commit hooks configuration
+├── .env.example            # Environment variable template
+├── .gitignore              # Git ignore patterns
+├── README.md               # This file (user documentation)
+└── CLAUDE.md               # Developer documentation
 ```
 
 **Note:** This project uses [uv](https://docs.astral.sh/uv/) for fast, reliable Python package management.
@@ -219,6 +231,73 @@ This pipeline uses Google's Gemini 3 Flash API. Costs depend on:
 
 Check current pricing at [Google AI Pricing](https://ai.google.dev/pricing).
 
+## Development
+
+### Code Quality
+
+This project uses comprehensive defensive programming tools to ensure code quality and security:
+
+- **ruff** - Fast Python linter and formatter
+- **mypy** - Static type checking to catch type errors before runtime
+- **bandit** - Security linter to detect common security issues
+- **pip-audit** - Dependency vulnerability scanner
+- **pre-commit** - Automated hooks that run before each commit
+
+### Running Tests
+
+The project includes a comprehensive test suite with 95% code coverage:
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with coverage report
+uv run pytest --cov=. --cov-report=term-missing
+
+# Run specific test file
+uv run pytest tests/test_analyze.py
+```
+
+### Code Quality Checks
+
+```bash
+# Format code
+uv run ruff format .
+
+# Check for linting issues
+uv run ruff check .
+
+# Type checking
+uv run mypy analyze.py process.py utils.py
+
+# Security scan
+uv run bandit -r .
+
+# Check for dependency vulnerabilities
+uv run pip-audit
+```
+
+### Pre-commit Hooks
+
+Pre-commit hooks are automatically installed and will run on every commit:
+
+```bash
+# Install hooks (one-time setup, already done if you followed install steps)
+uv run pre-commit install
+
+# Run hooks manually on all files
+uv run pre-commit run --all-files
+```
+
+The hooks automatically check for:
+- Code formatting (ruff)
+- Type errors (mypy)
+- Security issues (bandit)
+- Secrets in code (git-secrets)
+- Trailing whitespace, file endings, YAML/JSON/TOML syntax
+
+For more detailed development documentation, see [CLAUDE.md](CLAUDE.md).
+
 ## Troubleshooting
 
 ### API Key Not Found
@@ -241,7 +320,23 @@ Error: Voice reference file not found
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests and quality checks:
+   ```bash
+   uv run pytest
+   uv run ruff check --fix .
+   uv run ruff format .
+   uv run mypy analyze.py process.py utils.py
+   ```
+5. Commit your changes (pre-commit hooks will run automatically)
+6. Push to your branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
 
 ## License
 
