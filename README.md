@@ -19,26 +19,33 @@ AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Au
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.9 or higher
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key)
 
 ### Setup
 
-1. **Clone the repository**
+1. **Install uv** (if not already installed)
+   ```bash
+   # macOS/Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # Windows
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+   # Or with Homebrew
+   brew install uv
+   ```
+
+2. **Clone the repository**
    ```bash
    git clone https://github.com/anne-keksi-ai/travel-chronicle-pipeline.git
    cd travel-chronicle-pipeline
    ```
 
-2. **Create a virtual environment**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
 3. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
 4. **Configure API key**
@@ -64,7 +71,7 @@ Get your API key from [Google AI Studio](https://ai.google.dev/gemini-api/docs/a
 Process a Travel Chronicle export ZIP file:
 
 ```bash
-python process.py /path/to/export.zip
+uv run python process.py /path/to/export.zip
 ```
 
 ### With Voice Reference
@@ -72,7 +79,7 @@ python process.py /path/to/export.zip
 For improved speaker identification, provide a voice reference file where each family member introduces themselves:
 
 ```bash
-python process.py /path/to/export.zip --voice-reference voice_intro.webm
+uv run python process.py /path/to/export.zip --voice-reference voice_intro.webm
 ```
 
 ### Verbose Mode
@@ -80,7 +87,7 @@ python process.py /path/to/export.zip --voice-reference voice_intro.webm
 Show full transcripts during processing:
 
 ```bash
-python process.py /path/to/export.zip --verbose
+uv run python process.py /path/to/export.zip --verbose
 ```
 
 ### Dry Run
@@ -88,13 +95,13 @@ python process.py /path/to/export.zip --verbose
 Preview what would be processed without making API calls:
 
 ```bash
-python process.py /path/to/export.zip --dry-run
+uv run python process.py /path/to/export.zip --dry-run
 ```
 
 ### Combined Options
 
 ```bash
-python process.py /path/to/export.zip --voice-reference voice.webm --verbose
+uv run python process.py /path/to/export.zip --voice-reference voice.webm --verbose
 ```
 
 ## Command-Line Options
@@ -155,7 +162,7 @@ Totals:
 2. **(Optional) Record a voice reference** where each family member says their name
 3. **Run the pipeline:**
    ```bash
-   python process.py my_trip_export.zip --voice-reference voices.webm --verbose
+   uv run python process.py my_trip_export.zip --voice-reference voices.webm --verbose
    ```
 4. **Review the results** in `output/enriched_metadata.json`
 
@@ -166,11 +173,15 @@ travel-chronicle-pipeline/
 ├── analyze.py          # Core audio analysis with Gemini API
 ├── process.py          # Main pipeline for batch processing
 ├── utils.py            # Helper functions (ZIP extraction, JSON handling)
-├── requirements.txt    # Python dependencies
+├── pyproject.toml      # Project metadata and dependencies (uv)
+├── uv.lock            # Locked dependency versions
+├── requirements.txt    # Legacy pip requirements (deprecated, use uv)
 ├── .env.example        # Environment variable template
 ├── .gitignore         # Git ignore patterns
 └── README.md          # This file
 ```
+
+**Note:** This project uses [uv](https://docs.astral.sh/uv/) for fast, reliable Python package management.
 
 ## How It Works
 

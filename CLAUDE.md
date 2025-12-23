@@ -10,6 +10,7 @@ A Python script that processes audio exports from the Red Button app, analyzing 
 ## Tech Stack
 
 - **Python 3.9+**
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (replaces pip + venv)
 - **Google Gemini 3 Flash** — handles everything: transcription, timestamps, speaker ID, audio description
 - **python-dotenv** — for loading API keys from .env file
 
@@ -20,17 +21,25 @@ travel-chronicle-pipeline/
 ├── process.py              # Main entry point
 ├── analyze.py              # Gemini audio analysis
 ├── utils.py                # Helper functions
-├── requirements.txt
+├── pyproject.toml          # Project config & dependencies (uv)
+├── uv.lock                 # Locked dependency versions
+├── requirements.txt        # Legacy (deprecated, use uv)
 ├── .env                    # API keys (not committed)
 ├── .env.example            # Template for API keys
 ├── .gitignore
-└── CLAUDE.md               # This file
+├── README.md               # User-facing documentation
+└── CLAUDE.md               # This file (development notes)
 ```
 
 ## Installation
 
 ```bash
-pip install google-generativeai python-dotenv
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh  # macOS/Linux
+# OR: brew install uv
+
+# Install dependencies
+uv sync
 ```
 
 ## Environment Variables
@@ -204,7 +213,7 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
 
 ```bash
 # Process a ZIP file
-python process.py /path/to/export.zip
+uv run python process.py /path/to/export.zip
 
 # Output saved to ./output/enriched_metadata.json
 # Audio files extracted to ./output/audio/
@@ -240,7 +249,7 @@ Free tier: 15 requests per minute, 1 million tokens per day (more than enough)
 Test with a small export (2-3 clips) before processing full trip data.
 
 ```bash
-python process.py test_export.zip
+uv run python process.py test_export.zip
 cat output/enriched_metadata.json
 ```
 
