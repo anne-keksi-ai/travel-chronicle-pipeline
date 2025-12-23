@@ -2,8 +2,8 @@
 
 AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
 
-[![Tests](https://img.shields.io/badge/tests-43%20passing-success)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-95%25-success)](htmlcov/)
+[![Tests](https://img.shields.io/badge/tests-49%20passing-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-success)](htmlcov/)
 [![Type Checked](https://img.shields.io/badge/mypy-passing-success)](pyproject.toml)
 [![Security](https://img.shields.io/badge/bandit-passing-success)](pyproject.toml)
 [![Code Style](https://img.shields.io/badge/code%20style-ruff-000000)](https://docs.astral.sh/ruff/)
@@ -179,7 +179,7 @@ travel-chronicle-pipeline/
 ├── analyze.py              # Core audio analysis with Gemini API
 ├── process.py              # Main pipeline for batch processing
 ├── utils.py                # Helper functions (ZIP extraction, JSON handling)
-├── tests/                  # Comprehensive test suite (43 tests, 95% coverage)
+├── tests/                  # Comprehensive test suite (49 tests, 96% coverage)
 │   ├── conftest.py         # Shared test fixtures
 │   ├── test_analyze.py     # Tests for audio analysis
 │   ├── test_process.py     # Tests for main pipeline
@@ -245,7 +245,7 @@ This project uses comprehensive defensive programming tools to ensure code quali
 
 ### Running Tests
 
-The project includes a comprehensive test suite with 95% code coverage:
+The project includes a comprehensive test suite with 96% code coverage:
 
 ```bash
 # Run all tests

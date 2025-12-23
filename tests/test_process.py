@@ -17,12 +17,9 @@ class TestProcessMain:
     def test_dry_run_mode(self, sample_zip_file, monkeypatch, capsys, temp_dir):
         """Test dry run mode (no API calls)."""
         # Set command line arguments
-        monkeypatch.setattr(
-            sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"]
-        )
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"])
 
         # Change to temp directory to isolate output
-        import os
         monkeypatch.chdir(temp_dir)
 
         # Run main
@@ -90,9 +87,7 @@ class TestProcessMain:
         self, sample_zip_file, sample_metadata, monkeypatch, capsys, temp_dir
     ):
         """Test that ZIP is extracted and metadata is loaded correctly."""
-        monkeypatch.setattr(
-            sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"]
-        )
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"])
         monkeypatch.chdir(temp_dir)
 
         process.main()
@@ -105,9 +100,7 @@ class TestProcessMain:
 
     def test_process_displays_travelers(self, sample_zip_file, monkeypatch, capsys, temp_dir):
         """Test that travelers/talent are displayed correctly."""
-        monkeypatch.setattr(
-            sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"]
-        )
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"])
         monkeypatch.chdir(temp_dir)
 
         process.main()
@@ -147,9 +140,7 @@ class TestProcessMain:
     ):
         """Test that --verbose flag shows transcripts."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
-        monkeypatch.setattr(
-            sys, "argv", ["process.py", str(sample_zip_file), "--verbose"]
-        )
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--verbose"])
 
         # Mock analyze_audio
         mock_analyze = mocker.patch("process.analyze_audio")
@@ -192,6 +183,7 @@ class TestProcessMain:
 
         # Import genai and patch it at the point it's used
         import google.genai
+
         mocker.patch.object(google.genai, "Client", return_value=mock_client)
 
         # Mock analyze_audio
@@ -277,9 +269,7 @@ class TestProcessMain:
         assert "utterances transcribed" in captured.out
         assert "audio events detected" in captured.out
 
-    def test_process_handles_old_metadata_structure(
-        self, temp_dir, monkeypatch, mocker, capsys
-    ):
+    def test_process_handles_old_metadata_structure(self, temp_dir, monkeypatch, mocker, capsys):
         """Test processing with old metadata structure (travelers instead of talent)."""
         # Create ZIP with old-style metadata
         old_metadata = {
@@ -399,3 +389,130 @@ class TestProcessMain:
         context = call_args[1]["context"]
         assert "location" not in context
         assert "storyBeatContext" not in context
+
+    def test_process_missing_audio_file(
+        self, temp_dir, monkeypatch, mocker, sample_gemini_response, capsys
+    ):
+        """Test handling of missing audio file."""
+        # Create metadata with clip that points to non-existent audio file
+        metadata = {
+            "trip": {"id": "trip_123", "name": "Test Trip", "talent": []},
+            "clips": [
+                {
+                    "id": "clip_001",
+                    "filename": "audio/missing.webm",
+                    "recordedAt": "2025-12-22T10:00:00.000Z",
+                    "durationSeconds": 10,
+                }
+            ],
+        }
+
+        import zipfile
+
+        extract_dir = temp_dir / "missing_audio_export"
+        extract_dir.mkdir()
+
+        with open(extract_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f)
+
+        audio_dir = extract_dir / "audio"
+        audio_dir.mkdir()
+        # Don't create the audio file
+
+        zip_path = temp_dir / "missing_audio_export.zip"
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for file_path in extract_dir.rglob("*"):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(extract_dir.parent)
+                    zipf.write(file_path, arcname)
+
+        monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
+        monkeypatch.chdir(temp_dir)
+
+        mock_analyze = mocker.patch("process.analyze_audio")
+        mock_analyze.return_value = sample_gemini_response
+
+        process.main()
+
+        captured = capsys.readouterr()
+
+        # Verify error was caught and processing completed
+        assert "Error:" in captured.out
+        assert "0/1 clips successfully" in captured.out
+        assert "Errors: 1" in captured.out
+
+    def test_process_dry_run_with_voice_reference(
+        self, sample_zip_file, temp_dir, monkeypatch, capsys
+    ):
+        """Test dry-run mode with voice reference displays correctly."""
+        # Create a dummy voice reference file
+        voice_ref = temp_dir / "voice_ref.webm"
+        voice_ref.write_bytes(b"\x1a\x45\xdf\xa3")
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "process.py",
+                str(sample_zip_file),
+                "--dry-run",
+                "--voice-reference",
+                str(voice_ref),
+            ],
+        )
+        monkeypatch.chdir(temp_dir)
+
+        process.main()
+
+        captured = capsys.readouterr()
+
+        # Verify dry run shows voice reference info
+        assert "DRY RUN MODE" in captured.out
+        assert (
+            "Voice reference: voice_ref.webm" in captured.out
+            or "[DRY RUN] Voice reference:" in captured.out
+        )
+
+    def test_process_exception_during_clip_processing(
+        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+    ):
+        """Test that exceptions during clip processing are caught and logged."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
+        monkeypatch.chdir(temp_dir)
+
+        # Mock analyze_audio to raise an exception
+        mock_analyze = mocker.patch("process.analyze_audio")
+        mock_analyze.side_effect = [
+            RuntimeError("Unexpected error during analysis"),
+            sample_gemini_response,
+        ]
+
+        process.main()
+
+        captured = capsys.readouterr()
+
+        # Verify exception was caught and processing continued
+        assert "Error:" in captured.out
+        assert "Unexpected error" in captured.out
+        assert "1/2 clips successfully" in captured.out
+        assert "Errors: 1" in captured.out
+
+    def test_process_top_level_exception(self, temp_dir, monkeypatch, mocker, capsys):
+        """Test that top-level exceptions are caught and reported."""
+        # Create a malformed ZIP that will cause extract_zip to fail
+        bad_zip = temp_dir / "bad.zip"
+        bad_zip.write_text("This is not a valid ZIP file")
+
+        monkeypatch.setattr(sys, "argv", ["process.py", str(bad_zip)])
+        monkeypatch.chdir(temp_dir)
+
+        with pytest.raises(SystemExit) as exc_info:
+            process.main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+
+        # Verify error was printed
+        assert "Error:" in captured.err

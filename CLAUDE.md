@@ -116,6 +116,7 @@ tests/
 
 **Coverage:**
 - Coverage reports are generated in HTML format at `htmlcov/index.html`
+- Current coverage: 96% (49 tests)
 - Target: >80% code coverage
 - Configuration is in `pyproject.toml` under `[tool.pytest.ini_options]`
 

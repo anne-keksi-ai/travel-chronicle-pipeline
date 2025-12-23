@@ -1,7 +1,6 @@
 # Tests for analyze.py
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -68,9 +67,7 @@ class TestAnalyzeAudio:
         assert result["audioType"] == "speech"
         assert result["_meta"]["context"] == context
 
-    def test_analyze_with_voice_reference(
-        self, temp_dir, mock_genai_module, mock_gemini_client
-    ):
+    def test_analyze_with_voice_reference(self, temp_dir, mock_genai_module, mock_gemini_client):
         """Test audio analysis with voice reference file."""
         audio_path = temp_dir / "test_audio.webm"
         audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
@@ -96,6 +93,9 @@ class TestAnalyzeAudio:
         contents = call_args[1]["contents"]
         assert len(contents) == 3  # voice ref, audio file, prompt
 
+        # Verify result is valid
+        assert "audioType" in result
+
     def test_analyze_with_travelers_no_age(self, temp_dir, mock_genai_module, mock_gemini_client):
         """Test context with travelers without age field."""
         audio_path = temp_dir / "test_audio.webm"
@@ -113,6 +113,9 @@ class TestAnalyzeAudio:
         assert "Dad" in prompt
         # Should not have age-related text for travelers without age
         assert "age" not in prompt or "age" in prompt.lower()
+
+        # Verify result is valid
+        assert "audioType" in result
 
     def test_analyze_json_in_markdown_code_block(
         self, temp_dir, mock_genai_module, mock_gemini_client
@@ -245,3 +248,50 @@ class TestAnalyzeAudio:
 
         assert "Test Location" in prompt
         assert result["_meta"]["context"] == context
+
+    def test_analyze_voice_reference_without_travelers(
+        self, temp_dir, mock_genai_module, mock_gemini_client
+    ):
+        """Test voice reference with no travelers in context."""
+        audio_path = temp_dir / "test_audio.webm"
+        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
+
+        # Mock voice reference file
+        mock_voice_ref = mock_genai_module.Mock()
+        mock_voice_ref.name = "voice_reference.webm"
+
+        # Context with no travelers
+        context = {"location": "Some Place"}
+
+        result = analyze_audio(
+            str(audio_path), "fake_api_key", context=context, voice_reference_file=mock_voice_ref
+        )
+
+        # Verify the prompt mentions voice reference but handles missing travelers
+        call_args = mock_gemini_client.models.generate_content.call_args
+        prompt = call_args[1]["contents"][-1]
+
+        assert "VOICE REFERENCE" in prompt
+        assert "CLIP TO ANALYZE" in prompt
+        # Should have the fallback "." after "learn each person's voice"
+        assert "voice." in prompt or "voice:" in prompt
+
+        # Verify result is valid
+        assert "audioType" in result
+
+    def test_analyze_handles_none_response_text(
+        self, temp_dir, mock_genai_module, mock_gemini_client
+    ):
+        """Test handling of None response.text."""
+        audio_path = temp_dir / "test_audio.webm"
+        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
+
+        # Mock response with None text
+        mock_response = mock_gemini_client.models.generate_content.return_value
+        mock_response.text = None
+
+        result = analyze_audio(str(audio_path), "fake_api_key")
+
+        # Should handle None gracefully and return error
+        assert "error" in result
+        assert result["error"] == "Failed to parse JSON response"
