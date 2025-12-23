@@ -114,11 +114,6 @@ def main():
 
         print("=" * 60)
 
-        # Get trip-level context
-        trip_data = metadata.get("trip", {})
-        travelers = trip_data.get("talent") or metadata.get("travelers", [])
-        clips = metadata.get("clips", [])
-
         # Upload voice reference once if provided
         voice_reference_file = None
         if voice_reference and not dry_run:

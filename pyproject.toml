@@ -68,6 +68,7 @@ timeout = 300  # 5 minute default timeout for all tests
 
 [tool.mypy]
 python_version = "3.9"
+exclude = ["^.venv/", "^venv/"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false  # Start lenient, can make stricter later
@@ -86,6 +87,11 @@ module = [
     "dotenv.*",
 ]
 ignore_missing_imports = true
+
+# Skip checking pytest internals (causes issues with Python 3.9 compatibility)
+[[tool.mypy.overrides]]
+module = ["_pytest.*", "pytest.*"]
+follow_imports = "skip"
 
 [tool.bandit]
 exclude_dirs = [
