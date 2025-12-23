@@ -1,0 +1,10 @@
+.env
+.env.rtf
+__pycache__
+*.pyc
+output/
+venv/
+.DS_Store
+test_audio*/
+*.zip
+*.webm
