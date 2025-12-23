@@ -6,12 +6,18 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from google import genai
 
 
-def analyze_audio(audio_path: str, api_key: str, context: dict = None, voice_reference_file=None) -> dict:
+def analyze_audio(
+    audio_path: str,
+    api_key: str,
+    context: Optional[dict[str, Any]] = None,
+    voice_reference_file=None,
+) -> dict[str, Any]:
     """
     Analyze an audio clip using Gemini.
 
@@ -39,8 +45,8 @@ def analyze_audio(audio_path: str, api_key: str, context: dict = None, voice_ref
     print(f"Uploading audio file: {audio_file.name}")
 
     # Upload the audio file with explicit mime type
-    with open(audio_file, 'rb') as f:
-        uploaded_file = client.files.upload(file=f, config={'mime_type': 'audio/webm'})
+    with open(audio_file, "rb") as f:
+        uploaded_file = client.files.upload(file=f, config={"mime_type": "audio/webm"})
     print(f"Upload complete. File name: {uploaded_file.name}")
 
     # Build prompt dynamically based on context
@@ -53,11 +59,11 @@ def analyze_audio(audio_path: str, api_key: str, context: dict = None, voice_ref
         prompt += "2. CLIP TO ANALYZE: The actual audio clip to transcribe\n\n"
 
         prompt += "First, listen to the VOICE REFERENCE to learn each person's voice"
-        if context and context.get('travelers'):
+        if context and context.get("travelers"):
             prompt += ":\n"
-            for traveler in context['travelers']:
-                name = traveler['name']
-                age_str = f" (age {traveler['age']})" if 'age' in traveler else ""
+            for traveler in context["travelers"]:
+                name = traveler["name"]
+                age_str = f" (age {traveler['age']})" if "age" in traveler else ""
                 prompt += f"- How {name}{age_str} sounds\n"
         else:
             prompt += ".\n"
@@ -70,25 +76,27 @@ def analyze_audio(audio_path: str, api_key: str, context: dict = None, voice_ref
         prompt += "CONTEXT:\n"
 
         # Add traveler information
-        if context.get('travelers'):
-            travelers_str = ", ".join([
-                f"{t['name']} (age {t['age']})" if 'age' in t else t['name']
-                for t in context['travelers']
-            ])
+        if context.get("travelers"):
+            travelers_str = ", ".join(
+                [
+                    f"{t['name']} (age {t['age']})" if "age" in t else t["name"]
+                    for t in context["travelers"]
+                ]
+            )
             prompt += f"- Travelers: {travelers_str}\n"
 
         # Add location
-        if context.get('location'):
+        if context.get("location"):
             prompt += f"- Location: {context['location']}\n"
 
         # Add story beat context
-        if context.get('storyBeatContext'):
+        if context.get("storyBeatContext"):
             prompt += f"- This was recorded as a reaction to a story about: \"{context['storyBeatContext']}\"\n"
 
         # Add timestamp
-        if context.get('recordedAt'):
+        if context.get("recordedAt"):
             # Parse ISO timestamp and format it nicely
-            dt = datetime.fromisoformat(context['recordedAt'].replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(context["recordedAt"].replace("Z", "+00:00"))
             formatted_time = dt.strftime("%B %d, %Y, %I:%M %p")
             prompt += f"- Recorded at: {formatted_time}\n"
 
@@ -120,7 +128,7 @@ IMPORTANT:
 - audioType: Choose one of: speech, ambient, mixed, music, silent
 - transcript: Array of dialogue with timestamps. """
 
-    if context and context.get('travelers'):
+    if context and context.get("travelers"):
         prompt += "Use actual traveler names if you can identify them (e.g., 'Ellen' instead of 'Child'). "
 
     prompt += """If unsure, use 'Child', 'Adult Female', or 'Adult Male'.
@@ -140,37 +148,33 @@ Respond ONLY with valid JSON, no additional text."""
     contents.append(uploaded_file)
     contents.append(prompt)
 
-    response = client.models.generate_content(
-        model='gemini-3-flash-preview',
-        contents=contents
-    )
+    response = client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
 
     # Parse the JSON response
     try:
         # Extract the response text
-        response_text = response.text.strip()
+        response_text = response.text
+        if response_text is None:
+            response_text = ""
+        response_text = response_text.strip()
 
         # Try to find JSON in the response (sometimes LLMs wrap it in markdown)
-        if '```json' in response_text:
+        if "```json" in response_text:
             # Extract JSON from markdown code block
-            json_start = response_text.find('```json') + 7
-            json_end = response_text.find('```', json_start)
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
             response_text = response_text[json_start:json_end].strip()
-        elif '```' in response_text:
+        elif "```" in response_text:
             # Extract from generic code block
-            json_start = response_text.find('```') + 3
-            json_end = response_text.find('```', json_start)
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
             response_text = response_text[json_start:json_end].strip()
 
         # Parse the JSON
-        result = json.loads(response_text)
+        result: dict[str, Any] = json.loads(response_text)
 
         # Add metadata
-        result['_meta'] = {
-            'prompt': prompt,
-            'context': context,
-            'raw_response': response.text
-        }
+        result["_meta"] = {"prompt": prompt, "context": context, "raw_response": response.text}
 
         return result
 
@@ -178,24 +182,21 @@ Respond ONLY with valid JSON, no additional text."""
         # If JSON parsing fails, return error with raw text
         print(f"Warning: Failed to parse JSON response: {e}")
         return {
-            'error': 'Failed to parse JSON response',
-            'error_details': str(e),
-            'raw_response': response.text,
-            '_meta': {
-                'prompt': prompt,
-                'context': context
-            }
+            "error": "Failed to parse JSON response",
+            "error_details": str(e),
+            "raw_response": response.text,
+            "_meta": {"prompt": prompt, "context": context},
         }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python analyze.py /path/to/audio.webm")
         sys.exit(1)
 
     # Load environment variables
     load_dotenv()
-    api_key = os.getenv('GEMINI_API_KEY')
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("Error: GEMINI_API_KEY not found in .env file", file=sys.stderr)
         sys.exit(1)
@@ -205,36 +206,37 @@ if __name__ == '__main__':
     try:
         # Sample context for testing
         test_context = {
-            'travelers': [
-                {'name': 'Ellen', 'age': 7},
-                {'name': 'Alina', 'age': 8},
-                {'name': 'Mom'},
-                {'name': 'Dad'}
+            "travelers": [
+                {"name": "Ellen", "age": 7},
+                {"name": "Alina", "age": 8},
+                {"name": "Mom"},
+                {"name": "Dad"},
             ],
-            'location': 'La Mina Falls, El Yunque',
-            'recordedAt': '2024-12-28T14:34:22Z',
-            'storyBeatContext': 'Princess Louise-Hippolyte who ruled Monaco'
+            "location": "La Mina Falls, El Yunque",
+            "recordedAt": "2024-12-28T14:34:22Z",
+            "storyBeatContext": "Princess Louise-Hippolyte who ruled Monaco",
         }
 
         # Analyze the audio with context
         result = analyze_audio(audio_path, api_key, context=test_context)
 
         # Print results
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("ANALYSIS RESULT:")
-        print("="*60)
+        print("=" * 60)
 
-        if 'error' in result:
+        if "error" in result:
             print(f"Error: {result['error']}")
             print(f"Details: {result['error_details']}")
             print(f"\nRaw response:\n{result['raw_response']}")
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
 
-        print("="*60)
+        print("=" * 60)
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

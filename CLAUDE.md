@@ -28,6 +28,7 @@ travel-chronicle-pipeline/
 │   └── test_process.py     # Tests for process.py
 ├── pyproject.toml          # Project config & dependencies (uv)
 ├── uv.lock                 # Locked dependency versions
+├── .pre-commit-config.yaml # Pre-commit hooks configuration
 ├── requirements.txt        # Legacy (deprecated, use uv)
 ├── .env                    # API keys (not committed)
 ├── .env.example            # Template for API keys
@@ -118,6 +119,111 @@ tests/
 - Target: >80% code coverage
 - Configuration is in `pyproject.toml` under `[tool.pytest.ini_options]`
 
+### Defensive Programming
+
+This project uses multiple layers of defensive programming tools to catch bugs and security issues early.
+
+#### Type Checking with mypy
+
+**[mypy](https://mypy.readthedocs.io/)** performs static type checking to catch type errors before runtime.
+
+```bash
+# Check all Python files for type errors
+uv run mypy .
+
+# Check specific file
+uv run mypy analyze.py
+
+# Strict mode (more thorough)
+uv run mypy --strict analyze.py
+```
+
+Configuration is in `pyproject.toml` under `[tool.mypy]`.
+
+#### Security Scanning with bandit
+
+**[bandit](https://bandit.readthedocs.io/)** scans code for common security issues.
+
+```bash
+# Scan all Python files
+uv run bandit -r .
+
+# Scan specific file
+uv run bandit analyze.py
+
+# Show only high severity issues
+uv run bandit -r . -ll
+
+# Generate HTML report
+uv run bandit -r . -f html -o bandit-report.html
+```
+
+Configuration is in `pyproject.toml` under `[tool.bandit]`.
+
+#### Dependency Vulnerability Scanning with pip-audit
+
+**[pip-audit](https://pypi.org/project/pip-audit/)** checks dependencies for known security vulnerabilities.
+
+```bash
+# Check all dependencies
+uv run pip-audit
+
+# Fix vulnerabilities automatically (when possible)
+uv run pip-audit --fix
+
+# Output as JSON
+uv run pip-audit --format json
+```
+
+#### Pre-commit Hooks
+
+**[pre-commit](https://pre-commit.com/)** automatically runs checks before each git commit.
+
+```bash
+# Install hooks (one-time setup)
+uv run pre-commit install
+
+# Run hooks manually on all files
+uv run pre-commit run --all-files
+
+# Run specific hook
+uv run pre-commit run mypy --all-files
+
+# Update hook versions
+uv run pre-commit autoupdate
+```
+
+**Hooks configured:**
+- `ruff` - Linting and formatting
+- `mypy` - Type checking
+- `bandit` - Security scanning
+- `git-secrets` - Prevent committing secrets
+- `trailing-whitespace` - Remove trailing whitespace
+- `end-of-file-fixer` - Ensure files end with newline
+- `check-yaml` - Validate YAML files
+- `check-json` - Validate JSON files
+- `check-toml` - Validate TOML files
+- `check-added-large-files` - Prevent large files (>1MB)
+- `detect-private-key` - Detect private keys
+
+Configuration is in `.pre-commit-config.yaml`.
+
+**Recommended Workflow:**
+
+```bash
+# Before committing (pre-commit runs automatically)
+git add .
+git commit -m "Your message"
+
+# Or run checks manually first
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy .
+uv run bandit -r .
+uv run pytest
+git commit -m "Your message"
+```
+
 ## Environment Variables
 
 Create a `.env` file:
@@ -188,7 +294,7 @@ Enriched metadata.json:
       "highlights": [ ... ],
       "storyBeatContext": "...",
       "storyBeatMarks": [ ... ],
-      
+
       "audioType": "speech",
       "transcript": [
         { "timestamp": "00:02", "speaker": "Child", "text": "Can we go swimming?" },
@@ -220,13 +326,13 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
     Returns: audioType, transcript, audioEvents, sceneDescription, emotionalTone
     """
     genai.configure(api_key=api_key)
-    
+
     # Upload file to Gemini
     audio_file = genai.upload_file(audio_path)
-    
+
     # Analyze with Gemini
     model = genai.GenerativeModel("gemini-3-flash-preview")
-    
+
     prompt = """
     Analyze this audio clip recorded during a family trip.
 
@@ -249,16 +355,16 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
     - For audioEvents: note significant non-speech sounds (water, wind, laughter, music, etc.) with timestamps
     - If no speech, transcript should be an empty array []
     - If no notable audio events, audioEvents should be an empty array []
-    
+
     Return ONLY valid JSON, no other text.
     """
-    
+
     response = model.generate_content([audio_file, prompt])
-    
+
     # Parse JSON response
     import json
     result = json.loads(response.text)
-    
+
     return result
 ```
 
@@ -267,20 +373,20 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
 ```
 1. EXTRACT ZIP
    └── Unzip to temp directory
-   
-2. LOAD METADATA  
+
+2. LOAD METADATA
    └── Parse metadata.json
-   
+
 3. FOR EACH CLIP:
    ├── Print progress: "Processing clip 1/10: clip_001.m4a"
    ├── Upload audio to Gemini
-   ├── Call analyze_audio() 
+   ├── Call analyze_audio()
    ├── Add results to clip metadata
    └── Save progress (in case of crash)
-   
+
 4. SAVE OUTPUT
    └── Write enriched_metadata.json
-   
+
 5. PRINT SUMMARY
    └── "Processed 10 clips: 7 speech, 2 ambient, 1 mixed"
 ```

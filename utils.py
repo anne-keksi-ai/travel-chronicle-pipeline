@@ -26,7 +26,7 @@ def extract_zip(zip_path: str, output_dir: str) -> str:
 
     print(f"Extracting {zip_file.name} to {output_path}...")
 
-    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_file, "r") as zip_ref:
         zip_ref.extractall(output_path)
 
     # Find the extracted folder (usually the ZIP creates a folder with the same name)
@@ -59,8 +59,8 @@ def load_metadata(metadata_path: str) -> dict[str, Any]:
 
     print(f"Loading metadata from {metadata_file.name}...")
 
-    with open(metadata_file, encoding='utf-8') as f:
-        metadata = json.load(f)
+    with open(metadata_file, encoding="utf-8") as f:
+        metadata: dict[str, Any] = json.load(f)
 
     return metadata
 
@@ -78,7 +78,7 @@ def save_metadata(metadata: dict[str, Any], output_path: str) -> None:
 
     print(f"Saving metadata to {output_file}...")
 
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
 
     print(f"Metadata saved: {output_file}")
