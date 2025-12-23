@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from analyze import analyze_audio
+from analyze import DEFAULT_MODEL, analyze_audio
 
 
 class TestAnalyzeAudio:
@@ -203,7 +203,7 @@ class TestAnalyzeAudio:
 
         # Verify generate_content was called with correct model
         call_args = mock_gemini_client.models.generate_content.call_args
-        assert call_args[1]["model"] == "gemini-3-flash-preview"
+        assert call_args[1]["model"] == DEFAULT_MODEL
 
     def test_analyze_includes_meta_information(
         self, temp_dir, mock_genai_module, mock_gemini_client

@@ -10,8 +10,11 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 
-from analyze import analyze_audio
+from analyze import DEFAULT_AUDIO_MIME_TYPE, analyze_audio
 from utils import extract_zip, load_metadata, save_metadata
+
+# Constants
+DEFAULT_OUTPUT_DIR = "./output"
 
 
 @dataclass
@@ -165,7 +168,7 @@ def upload_voice_reference(
 
     client = genai.Client(api_key=api_key)
     with open(voice_ref_path, "rb") as f:
-        voice_reference_file = client.files.upload(file=f, config={"mime_type": "audio/webm"})
+        voice_reference_file = client.files.upload(file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE})
 
     print(f"Voice reference uploaded. File name: {voice_reference_file.name}")
     print(f"This reference will be used for all {num_clips} clips")
@@ -395,7 +398,7 @@ def main() -> None:
     api_key = validate_inputs(zip_path, voice_reference, dry_run)
 
     try:
-        output_dir = "./output"
+        output_dir = DEFAULT_OUTPUT_DIR
         print_header(dry_run, voice_reference)
 
         # Extract ZIP and load metadata

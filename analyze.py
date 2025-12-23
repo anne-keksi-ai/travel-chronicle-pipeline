@@ -11,6 +11,10 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from google import genai
 
+# Constants
+DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_AUDIO_MIME_TYPE = "audio/webm"
+
 
 def analyze_audio(
     audio_path: str,
@@ -46,7 +50,7 @@ def analyze_audio(
 
     # Upload the audio file with explicit mime type
     with open(audio_file, "rb") as f:
-        uploaded_file = client.files.upload(file=f, config={"mime_type": "audio/webm"})
+        uploaded_file = client.files.upload(file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE})
     print(f"Upload complete. File name: {uploaded_file.name}")
 
     # Build prompt dynamically based on context
@@ -148,7 +152,7 @@ Respond ONLY with valid JSON, no additional text."""
     contents.append(uploaded_file)
     contents.append(prompt)
 
-    response = client.models.generate_content(model="gemini-3-flash-preview", contents=contents)
+    response = client.models.generate_content(model=DEFAULT_MODEL, contents=contents)
 
     # Parse the JSON response
     try:
