@@ -5,17 +5,51 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 
-from analyze import DEFAULT_AUDIO_MIME_TYPE, analyze_audio
+from analyze import analyze_audio, summarize_story_beat
+from audio_utils import ConcatenatedAudio, cleanup_concatenated_audio, concatenate_audio_files
 from utils import extract_zip, load_metadata, save_metadata
 
 # Constants
-DEFAULT_OUTPUT_DIR = "./output"
+DEFAULT_OUTPUT_BASE = "./output"
 VOICE_REFERENCE_FILENAME = "voice_reference.webm"
+VOICE_REFERENCES_FOLDER = "voice_references"
+
+
+def generate_output_dir(zip_path: str, base_dir: str = DEFAULT_OUTPUT_BASE) -> str:
+    """
+    Generate a versioned output directory path based on ZIP filename and timestamp.
+
+    Args:
+        zip_path: Path to the input ZIP file
+        base_dir: Base output directory
+
+    Returns:
+        Path like "./output/day_at_home_v2_2025-12-24_185031"
+    """
+    # Get ZIP filename without extension
+    zip_name = Path(zip_path).stem
+
+    # Generate timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+    # Combine into output directory path
+    output_dir = Path(base_dir) / f"{zip_name}_{timestamp}"
+
+    return str(output_dir)
+
+
+@dataclass
+class VoiceReference:
+    """A voice reference file with associated traveler info."""
+
+    traveler: dict[str, Any]
+    file_path: Path
 
 
 @dataclass
@@ -42,6 +76,45 @@ def build_story_beats_lookup(metadata: dict[str, Any]) -> dict[str, dict[str, An
     """
     story_beats = metadata.get("storyBeats", [])
     return {beat["id"]: beat for beat in story_beats if "id" in beat}
+
+
+def summarize_story_beats(
+    story_beats_lookup: dict[str, dict[str, Any]], api_key: str
+) -> dict[str, str]:
+    """
+    Summarize all story beats into concise descriptions.
+
+    Args:
+        story_beats_lookup: Dictionary mapping story beat IDs to their full data
+        api_key: Gemini API key
+
+    Returns:
+        Dictionary mapping story beat IDs to their summaries
+    """
+    if not story_beats_lookup:
+        return {}
+
+    print("\n" + "=" * 60)
+    print("SUMMARIZING STORY BEATS")
+    print("=" * 60)
+
+    summaries: dict[str, str] = {}
+    total = len(story_beats_lookup)
+
+    for idx, (beat_id, beat) in enumerate(story_beats_lookup.items(), 1):
+        text = beat.get("text", "")
+        if not text:
+            continue
+
+        print(f"Summarizing story beat {idx}/{total}...")
+        summary = summarize_story_beat(text, api_key)
+        summaries[beat_id] = summary
+        print(f"  → {summary[:80]}{'...' if len(summary) > 80 else ''}")
+
+    print(f"\n{len(summaries)} story beats summarized")
+    print("=" * 60)
+
+    return summaries
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,7 +167,7 @@ def validate_inputs(zip_path: str, dry_run: bool) -> Optional[str]:
 
 def detect_voice_reference(extracted_folder: str) -> Optional[Path]:
     """
-    Check if a voice reference file exists in the extracted folder.
+    Check if a legacy single voice reference file exists in the extracted folder.
 
     Args:
         extracted_folder: Path to the extracted ZIP contents
@@ -106,6 +179,74 @@ def detect_voice_reference(extracted_folder: str) -> Optional[Path]:
     if voice_ref_path.exists():
         return voice_ref_path
     return None
+
+
+def load_voice_references(
+    extracted_folder: str, travelers: list[dict[str, Any]]
+) -> list[VoiceReference]:
+    """
+    Load individual voice reference files for each traveler.
+
+    Matches files to travelers based on the voiceReferenceFile field in traveler
+    metadata. The voiceReferenceFile contains the relative path from the export
+    root (e.g., "voice_references/ellen.webm").
+
+    Args:
+        extracted_folder: Path to the extracted ZIP contents
+        travelers: List of traveler information from metadata
+
+    Returns:
+        List of VoiceReference objects for travelers with voice reference files
+    """
+    extracted_path = Path(extracted_folder)
+    voice_references: list[VoiceReference] = []
+
+    for traveler in travelers:
+        # voiceReferenceFile contains relative path like "voice_references/ellen.webm"
+        # Can be None or missing
+        voice_ref_relative_path = traveler.get("voiceReferenceFile")
+        if not voice_ref_relative_path:
+            continue
+
+        voice_ref_path = extracted_path / voice_ref_relative_path
+        if voice_ref_path.exists():
+            voice_references.append(VoiceReference(traveler=traveler, file_path=voice_ref_path))
+
+    return voice_references
+
+
+def print_voice_reference_summary(
+    travelers: list[dict[str, Any]], voice_references: list[VoiceReference]
+) -> None:
+    """
+    Print summary of voice reference availability.
+
+    Args:
+        travelers: List of all travelers
+        voice_references: List of loaded voice references
+    """
+    from analyze import format_traveler
+
+    if not travelers:
+        print("\nNo travelers defined")
+        return
+
+    voice_ref_names = [format_traveler(vr.traveler) for vr in voice_references]
+    missing_travelers = [
+        t for t in travelers if not any(vr.traveler == t for vr in voice_references)
+    ]
+    missing_names = [format_traveler(t) for t in missing_travelers]
+
+    if voice_references:
+        names_str = ", ".join(voice_ref_names)
+        print(
+            f"\nVoice references found: {names_str} ({len(voice_references)}/{len(travelers)} travelers)"
+        )
+        if missing_names:
+            missing_str = ", ".join(missing_names)
+            print(f"Missing voice reference: {missing_str}")
+    else:
+        print("\nNo voice references (speaker ID may be less accurate)")
 
 
 def print_header(dry_run: bool) -> None:
@@ -170,44 +311,11 @@ def print_trip_summary(
     return trip_data, clips, travelers, story_beats_lookup
 
 
-def upload_voice_reference(voice_reference: str, api_key: str, num_clips: int) -> Any:
-    """
-    Upload voice reference file to Gemini.
-
-    Args:
-        voice_reference: Path to voice reference file
-        api_key: Gemini API key
-        num_clips: Number of clips (for display)
-
-    Returns:
-        Uploaded file object
-    """
-    from google import genai
-
-    print("\n" + "=" * 60)
-    print("UPLOADING VOICE REFERENCE")
-    print("=" * 60)
-
-    voice_ref_path = Path(voice_reference)
-    print(f"Uploading voice reference: {voice_ref_path.name}")
-
-    client = genai.Client(api_key=api_key)
-    with open(voice_ref_path, "rb") as f:
-        voice_reference_file = client.files.upload(
-            file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE}
-        )
-
-    print(f"Voice reference uploaded. File name: {voice_reference_file.name}")
-    print(f"This reference will be used for all {num_clips} clips")
-    print("=" * 60)
-
-    return voice_reference_file
-
-
 def build_clip_context(
     clip: dict[str, Any],
     travelers: list[dict[str, Any]],
     story_beats_lookup: Optional[dict[str, dict[str, Any]]] = None,
+    story_beat_summaries: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """
     Build context dictionary for a clip.
@@ -216,6 +324,7 @@ def build_clip_context(
         clip: Clip metadata
         travelers: List of traveler information
         story_beats_lookup: Optional dictionary mapping story beat IDs to their data
+        story_beat_summaries: Optional dictionary mapping story beat IDs to summaries
 
     Returns:
         Context dictionary for audio analysis
@@ -234,8 +343,10 @@ def build_clip_context(
     if story_beat_id and story_beats_lookup:
         story_beat = story_beats_lookup.get(story_beat_id)
         if story_beat:
-            # Include text from the story beat
-            if story_beat.get("text"):
+            # Use summary if available, otherwise use full text
+            if story_beat_summaries and story_beat_id in story_beat_summaries:
+                context["storyBeatContext"] = story_beat_summaries[story_beat_id]
+            elif story_beat.get("text"):
                 context["storyBeatContext"] = story_beat["text"]
             # Include starred status
             if story_beat.get("starred"):
@@ -257,7 +368,7 @@ def process_single_clip(
     audio_path: Path,
     context: dict[str, Any],
     api_key: str,
-    voice_reference_file: Any,
+    voice_references: list[VoiceReference],
     verbose: bool,
     stats: ProcessingStats,
 ) -> None:
@@ -269,55 +380,71 @@ def process_single_clip(
         audio_path: Path to audio file
         context: Context dictionary
         api_key: Gemini API key
-        voice_reference_file: Optional uploaded voice reference
+        voice_references: List of voice references to concatenate with the clip
         verbose: Whether to show verbose output
         stats: Statistics object (modified in place)
     """
-    result = analyze_audio(
-        str(audio_path),
-        api_key,
-        context=context,
-        voice_reference_file=voice_reference_file,
-    )
+    concatenated: Optional[ConcatenatedAudio] = None
 
-    # Check if analysis succeeded
-    if "error" in result:
-        print(f"  ⚠️  Analysis failed: {result['error']}")
-        clip["analysis"] = None
-        clip["analysisError"] = result["error"]
-        stats.error_count += 1
-    else:
-        # Add results to clip (exclude _meta for cleaner output)
-        clip["analysis"] = {
-            "audioType": result.get("audioType"),
-            "transcript": result.get("transcript"),
-            "audioEvents": result.get("audioEvents"),
-            "sceneDescription": result.get("sceneDescription"),
-            "emotionalTone": result.get("emotionalTone"),
-        }
+    try:
+        # Concatenate voice references with the clip if we have voice references
+        if voice_references:
+            voice_ref_files = [(vr.traveler, vr.file_path) for vr in voice_references]
+            concatenated = concatenate_audio_files(voice_ref_files, audio_path)
+            analysis_path = str(concatenated.file_path)
+        else:
+            analysis_path = str(audio_path)
 
-        # Update statistics
-        utterance_count = len(result.get("transcript", []))
-        event_count = len(result.get("audioEvents", []))
-        audio_type = result.get("audioType", "unknown")
+        result = analyze_audio(
+            analysis_path,
+            api_key,
+            context=context,
+            concatenated_audio=concatenated,
+        )
 
-        stats.audio_type_counts[audio_type] = stats.audio_type_counts.get(audio_type, 0) + 1
-        stats.total_utterances += utterance_count
-        stats.total_audio_events += event_count
+        # Check if analysis succeeded
+        if "error" in result:
+            print(f"  ⚠️  Analysis failed: {result['error']}")
+            clip["analysis"] = None
+            clip["analysisError"] = result["error"]
+            stats.error_count += 1
+        else:
+            # Add results to clip (exclude _meta for cleaner output)
+            clip["analysis"] = {
+                "audioType": result.get("audioType"),
+                "transcript": result.get("transcript"),
+                "audioEvents": result.get("audioEvents"),
+                "sceneDescription": result.get("sceneDescription"),
+                "emotionalTone": result.get("emotionalTone"),
+            }
 
-        # Print brief result
-        print(f"  ✓ {audio_type}, {utterance_count} utterances, {event_count} audio events")
+            # Update statistics
+            utterance_count = len(result.get("transcript", []))
+            event_count = len(result.get("audioEvents", []))
+            audio_type = result.get("audioType", "unknown")
 
-        # Show verbose output if requested
-        if verbose and result.get("transcript"):
-            print("\n  Transcript:")
-            for utterance in result["transcript"]:
-                speaker = utterance.get("speaker", "Unknown")
-                text = utterance.get("text", "")
-                timestamp = utterance.get("timestamp", "00:00")
-                print(f"    [{timestamp}] {speaker}: {text}")
+            stats.audio_type_counts[audio_type] = stats.audio_type_counts.get(audio_type, 0) + 1
+            stats.total_utterances += utterance_count
+            stats.total_audio_events += event_count
 
-        stats.processed_count += 1
+            # Print brief result
+            print(f"  ✓ {audio_type}, {utterance_count} utterances, {event_count} audio events")
+
+            # Show verbose output if requested
+            if verbose and result.get("transcript"):
+                print("\n  Transcript:")
+                for utterance in result["transcript"]:
+                    speaker = utterance.get("speaker", "Unknown")
+                    text = utterance.get("text", "")
+                    timestamp = utterance.get("timestamp", "00:00")
+                    print(f"    [{timestamp}] {speaker}: {text}")
+
+            stats.processed_count += 1
+
+    finally:
+        # Clean up the concatenated audio file
+        if concatenated:
+            cleanup_concatenated_audio(concatenated)
 
 
 def process_clips(
@@ -325,9 +452,9 @@ def process_clips(
     extracted_folder: str,
     travelers: list[dict[str, Any]],
     story_beats_lookup: dict[str, dict[str, Any]],
+    story_beat_summaries: dict[str, str],
     api_key: Optional[str],
-    voice_reference_file: Any,
-    has_voice_reference: bool,
+    voice_references: list[VoiceReference],
     verbose: bool,
     dry_run: bool,
 ) -> ProcessingStats:
@@ -339,9 +466,9 @@ def process_clips(
         extracted_folder: Path to extracted ZIP contents
         travelers: List of traveler information
         story_beats_lookup: Dictionary mapping story beat IDs to their data
+        story_beat_summaries: Dictionary mapping story beat IDs to summaries
         api_key: Gemini API key (None for dry run)
-        voice_reference_file: Optional uploaded voice reference
-        has_voice_reference: Whether voice reference is available
+        voice_references: List of voice references to concatenate with each clip
         verbose: Whether to show verbose output
         dry_run: Whether this is a dry run
 
@@ -361,7 +488,7 @@ def process_clips(
 
         try:
             # Build clip-specific context
-            context = build_clip_context(clip, travelers, story_beats_lookup)
+            context = build_clip_context(clip, travelers, story_beats_lookup, story_beat_summaries)
 
             # Track clips with story beats
             if context.get("storyBeatContext"):
@@ -385,6 +512,8 @@ def process_clips(
 
             # Dry run mode - show what would be processed
             if dry_run:
+                from analyze import format_traveler
+
                 print(f"  [DRY RUN] Would analyze: {audio_path}")
                 print(
                     f"  [DRY RUN] Context: {len(travelers)} travelers, "
@@ -393,8 +522,10 @@ def process_clips(
                 if context.get("storyBeatContext"):
                     starred = " (starred)" if context.get("storyBeatStarred") else ""
                     print(f"  [DRY RUN] Story beat: {context['storyBeatContext'][:50]}...{starred}")
-                if has_voice_reference:
-                    print(f"  [DRY RUN] Voice reference: {VOICE_REFERENCE_FILENAME}")
+                if voice_references:
+                    voice_ref_names = [format_traveler(vr.traveler) for vr in voice_references]
+                    print(f"  [DRY RUN] Voice references: {', '.join(voice_ref_names)}")
+                    print("  [DRY RUN] Would concatenate voice refs + clip into single file")
                 continue
 
             # Analyze the audio
@@ -402,7 +533,13 @@ def process_clips(
                 raise ValueError("API key is required for audio analysis")
 
             process_single_clip(
-                clip, audio_path, context, api_key, voice_reference_file, verbose, stats
+                clip,
+                audio_path,
+                context,
+                api_key,
+                voice_references,
+                verbose,
+                stats,
             )
 
         except Exception as e:
@@ -469,7 +606,7 @@ def main() -> None:
     api_key = validate_inputs(zip_path, dry_run)
 
     try:
-        output_dir = DEFAULT_OUTPUT_DIR
+        output_dir = generate_output_dir(zip_path)
         print_header(dry_run)
 
         # Extract ZIP and load metadata
@@ -477,32 +614,40 @@ def main() -> None:
         metadata_path = Path(extracted_folder) / "metadata.json"
         metadata = load_metadata(metadata_path)
 
-        # Auto-detect voice reference in extracted folder
-        voice_reference_path = detect_voice_reference(extracted_folder)
-        if voice_reference_path:
-            print(f"\nVoice reference found: {VOICE_REFERENCE_FILENAME} ✓")
-        else:
-            print("\nNo voice reference (speaker ID may be less accurate)")
-
         # Print trip summary and extract data
         _, clips, travelers, story_beats_lookup = print_trip_summary(metadata)
 
-        # Upload voice reference once if found
-        voice_reference_file = None
-        if voice_reference_path and not dry_run and api_key:
-            voice_reference_file = upload_voice_reference(
-                str(voice_reference_path), api_key, len(clips)
-            )
+        # Load individual voice references (new format)
+        voice_references = load_voice_references(extracted_folder, travelers)
 
-        # Process all clips
+        # Auto-detect legacy single voice reference
+        voice_reference_path = detect_voice_reference(extracted_folder)
+
+        # Print voice reference summary
+        if voice_references:
+            # Individual voice references (new format)
+            print_voice_reference_summary(travelers, voice_references)
+        elif voice_reference_path:
+            # Legacy single voice reference - not currently supported with concatenation
+            print(f"\nLegacy voice reference found: {VOICE_REFERENCE_FILENAME}")
+            print("Note: Legacy format not supported. Please use individual voice references.")
+        else:
+            print("\nNo voice references (speaker ID may be less accurate)")
+
+        # Summarize story beats (skip in dry run mode)
+        story_beat_summaries: dict[str, str] = {}
+        if not dry_run and api_key and story_beats_lookup:
+            story_beat_summaries = summarize_story_beats(story_beats_lookup, api_key)
+
+        # Process all clips (voice references are concatenated with each clip)
         stats = process_clips(
             clips,
             extracted_folder,
             travelers,
             story_beats_lookup,
+            story_beat_summaries,
             api_key,
-            voice_reference_file,
-            voice_reference_path is not None,
+            voice_references,
             verbose,
             dry_run,
         )

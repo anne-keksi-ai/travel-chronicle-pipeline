@@ -116,7 +116,7 @@ tests/
 
 **Coverage:**
 - Coverage reports are generated in HTML format at `htmlcov/index.html`
-- Current coverage: 96% (49 tests)
+- Current coverage: 95% (111 tests)
 - Target: >80% code coverage
 - Configuration is in `pyproject.toml` under `[tool.pytest.ini_options]`
 
@@ -234,85 +234,125 @@ GEMINI_API_KEY=AI...
 
 ## Input Format
 
-ZIP file structure from Red Button app:
+ZIP file structure from Travel Chronicle app:
 ```
-export.zip
+trip-name.zip
 ├── metadata.json
-└── audio/
-    ├── clip_001.m4a
-    ├── clip_002.m4a
+├── audio/
+│   ├── clip_001.webm (or .m4a on iOS)
+│   ├── clip_002.webm
+│   └── ...
+└── voice_references/
+    ├── ellen.webm
+    ├── dad.webm
     └── ...
 ```
 
 metadata.json structure:
 ```json
 {
-  "exportedAt": "2025-01-02T18:00:00Z",
   "trip": {
     "id": "trip_abc123",
     "name": "Puerto Rico Dec 2024",
+    "createdAt": "2024-12-27T10:00:00Z",
+    "exportedAt": "2025-01-02T18:00:00Z",
+    "status": "active",
     "talent": [
-      { "name": "Alina", "age": 8 },
-      { "name": "Ellen", "age": 7 },
-      { "name": "Mom" },
-      { "name": "Dad" }
+      {
+        "name": "Ellen",
+        "age": 7,
+        "voiceReferenceFile": "voice_references/ellen.webm"
+      },
+      {
+        "name": "Dad",
+        "age": null,
+        "voiceReferenceFile": null
+      }
     ]
   },
   "clips": [
     {
       "id": "clip_xyz789",
-      "filename": "clip_001.m4a",
+      "filename": "audio/clip_001.webm",
       "recordedAt": "2024-12-28T14:34:22Z",
       "durationSeconds": 34,
+      "mimeType": "audio/webm",
       "location": {
         "lat": 18.2731,
         "lng": -65.7877,
-        "placeName": "La Mina Falls, El Yunque"
+        "placeName": "La Mina Falls, El Yunque",
+        "accuracy": 10
       },
-      "highlights": [{ "timestampSeconds": 12 }],
-      "storyBeatContext": "Story about the waterfall...",
-      "storyBeatMarks": [{ "timestampSeconds": 45 }]
+      "highlights": [
+        { "timestampSeconds": 12 },
+        { "timestampSeconds": 28 }
+      ],
+      "storyBeatId": "storybeat_abc123"
+    }
+  ],
+  "storyBeats": [
+    {
+      "id": "storybeat_abc123",
+      "location": "La Mina Falls, Puerto Rico",
+      "text": "Once upon a time at La Mina Falls...",
+      "starred": true,
+      "createdAt": "2024-12-28T15:00:00Z"
     }
   ]
 }
 ```
+
+Key fields:
+- `talent[].voiceReferenceFile`: Per-traveler voice reference path (can be `null`)
+- `talent[].age`: Can be a number or `null`
+- `clips[].storyBeatId`: References a story beat by ID (can be `null`)
+- `storyBeats[]`: Separate array of story beats with `id`, `text`, and `starred` status
 
 ## Output Format
 
 Enriched metadata.json:
 ```json
 {
-  "exportedAt": "2025-01-02T18:00:00Z",
-  "processedAt": "2025-01-03T10:00:00Z",
   "trip": { ... },
   "clips": [
     {
       "id": "clip_xyz789",
-      "filename": "clip_001.m4a",
+      "filename": "audio/clip_001.webm",
       "recordedAt": "2024-12-28T14:34:22Z",
       "durationSeconds": 34,
       "location": { ... },
       "highlights": [ ... ],
-      "storyBeatContext": "...",
-      "storyBeatMarks": [ ... ],
-
-      "audioType": "speech",
-      "transcript": [
-        { "timestamp": "00:02", "speaker": "Child", "text": "Can we go swimming?" },
-        { "timestamp": "00:05", "speaker": "Adult Female", "text": "No, it's too cold!" },
-        { "timestamp": "00:08", "speaker": "Child", "text": "Watch me!" }
-      ],
-      "audioEvents": [
-        { "timestamp": "00:00", "description": "waterfall rushing in background" },
-        { "timestamp": "00:07", "description": "splashing water" },
-        { "timestamp": "00:10", "description": "laughter" }
-      ],
-      "sceneDescription": "A family is at a waterfall. A child asks to swim while an adult warns about the cold water.",
-      "emotionalTone": "playful, excited"
+      "storyBeatId": "storybeat_abc123",
+      "storyBeat": {
+        "id": "storybeat_abc123",
+        "text": "Once upon a time at La Mina Falls...",
+        "starred": true
+      },
+      "analysis": {
+        "audioType": "speech",
+        "transcript": [
+          { "timestamp": "00:02", "speaker": "Ellen", "text": "Can we go swimming?" },
+          { "timestamp": "00:05", "speaker": "Mom", "text": "No, it's too cold!" },
+          { "timestamp": "00:08", "speaker": "Ellen", "text": "Watch me!" }
+        ],
+        "audioEvents": [
+          { "timestamp": "00:00", "event": "waterfall rushing in background" },
+          { "timestamp": "00:07", "event": "splashing water" },
+          { "timestamp": "00:10", "event": "laughter" }
+        ],
+        "sceneDescription": "A family is at a waterfall. A child asks to swim while an adult warns about the cold water.",
+        "emotionalTone": "playful"
+      }
     }
-  ]
+  ],
+  "storyBeats": [ ... ]
 }
 ```
+
+Key additions:
+- `clips[].storyBeat`: Resolved story beat with `id`, `text`, and `starred` status
+- `clips[].analysis`: All Gemini analysis results grouped under `analysis` key
+- Speaker names use actual traveler names when voice references are provided
 
 ## Core Function: analyze_audio()
 
@@ -373,23 +413,31 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
 
 ```
 1. EXTRACT ZIP
-   └── Unzip to temp directory
+   └── Unzip to output directory
 
 2. LOAD METADATA
-   └── Parse metadata.json
+   ├── Parse metadata.json
+   ├── Build story beats lookup by ID
+   └── Load per-traveler voice references
 
-3. FOR EACH CLIP:
-   ├── Print progress: "Processing clip 1/10: clip_001.m4a"
+3. UPLOAD VOICE REFERENCES (once)
+   └── Upload each traveler's voice reference file to Gemini
+
+4. FOR EACH CLIP:
+   ├── Print progress: "Processing clip 1/10: audio/clip_001.webm"
+   ├── Build context (travelers, location, story beat)
    ├── Upload audio to Gemini
-   ├── Call analyze_audio()
-   ├── Add results to clip metadata
-   └── Save progress (in case of crash)
+   ├── Call analyze_audio() with voice references
+   ├── Resolve story beat ID to full object
+   └── Add results to clip metadata
 
-4. SAVE OUTPUT
+5. SAVE OUTPUT
    └── Write enriched_metadata.json
 
-5. PRINT SUMMARY
-   └── "Processed 10 clips: 7 speech, 2 ambient, 1 mixed"
+6. PRINT SUMMARY
+   ├── "Processed 10 clips: 7 speech, 2 ambient, 1 mixed"
+   ├── "Story Beats: 5 (2 starred)"
+   └── "Voice references found: Ellen, Mom (2/4 travelers)"
 ```
 
 ## Usage

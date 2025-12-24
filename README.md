@@ -2,8 +2,8 @@
 
 AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
 
-[![Tests](https://img.shields.io/badge/tests-85%20passing-success)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-97%25-success)](htmlcov/)
+[![Tests](https://img.shields.io/badge/tests-111%20passing-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-success)](htmlcov/)
 [![Type Checked](https://img.shields.io/badge/mypy-passing-success)](pyproject.toml)
 [![Security](https://img.shields.io/badge/bandit-passing-success)](pyproject.toml)
 [![Code Style](https://img.shields.io/badge/code%20style-ruff-000000)](https://docs.astral.sh/ruff/)
@@ -11,7 +11,8 @@ AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Au
 ## Features
 
 - 🎯 **Context-Aware Transcription**: Uses family member names and trip context for accurate speaker identification
-- 🗣️ **Voice Reference Support**: Automatically uses `voice_reference.webm` from export for better speaker identification
+- 🗣️ **Per-Traveler Voice References**: Individual voice reference files for each family member enable precise speaker identification
+- 📖 **Story Beat Integration**: Links audio clips to story beats with starred favorites support
 - 🌍 **Multilingual Support**: Handles multiple languages (e.g., English, Finnish) in the same audio clip
 - ⏱️ **Timestamped Transcripts**: Every utterance includes precise timestamps
 - 🎭 **Emotional Tone Analysis**: Detects the mood and feeling of each clip (happy, calm, excited, etc.)
@@ -80,14 +81,15 @@ Process a Travel Chronicle export ZIP file:
 uv run python process.py /path/to/export.zip
 ```
 
-### With Voice Reference
+### With Voice References
 
-For improved speaker identification, include a `voice_reference.webm` file in your Travel Chronicle export. The pipeline automatically detects and uses it:
+For improved speaker identification, the pipeline automatically detects individual voice reference files for each traveler in the `voice_references/` folder:
 
 ```bash
-# Voice reference is auto-detected if present in the ZIP
+# Voice references are auto-detected if present in the ZIP
 uv run python process.py /path/to/export.zip
-# Output: "Voice reference found: voice_reference.webm ✓"
+# Output: "Voice references found: Ellen, Mom, Dad (3/4 travelers)"
+# Output: "Missing voice reference: Alina"
 ```
 
 ### Verbose Mode
@@ -121,7 +123,7 @@ uv run python process.py /path/to/export.zip --verbose --dry-run
 | `--dry-run` | Preview processing without making API calls |
 | `--help`, `-h` | Show help message |
 
-**Note:** Voice reference (`voice_reference.webm`) is automatically detected from the export ZIP file.
+**Note:** Voice references are automatically detected from the `voice_references/` folder in the export ZIP file.
 
 ## Output
 
@@ -160,6 +162,9 @@ Done! Processed 5/5 clips successfully
 Audio Type Breakdown:
   2 mixed, 3 speech
 
+Story Beats: 5 (2 starred)
+  3 clips are reactions to story beats
+
 Totals:
   32 utterances transcribed
   8 audio events detected
@@ -168,7 +173,7 @@ Totals:
 ## Example Workflow
 
 1. **Export your Travel Chronicle trip** to a ZIP file
-2. **(Optional) Include a voice reference** (`voice_reference.webm`) in the export where each family member says their name
+2. **(Optional) Record voice references** - each family member records their voice in the app
 3. **Run the pipeline:**
    ```bash
    uv run python process.py my_trip_export.zip --verbose
@@ -182,7 +187,7 @@ travel-chronicle-pipeline/
 ├── analyze.py              # Core audio analysis with Gemini API
 ├── process.py              # Main pipeline for batch processing
 ├── utils.py                # Helper functions (ZIP extraction, JSON handling)
-├── tests/                  # Comprehensive test suite (85 tests, 97% coverage)
+├── tests/                  # Comprehensive test suite (111 tests, 95% coverage)
 │   ├── conftest.py         # Shared test fixtures
 │   ├── test_analyze.py     # Tests for audio analysis
 │   ├── test_process.py     # Tests for main pipeline
@@ -201,36 +206,42 @@ travel-chronicle-pipeline/
 ## How It Works
 
 1. **Extract** the Travel Chronicle export ZIP
-2. **Load** metadata about the trip and travelers
-3. **Detect** voice reference (`voice_reference.webm`) if present in export
-4. **Upload** voice reference to Gemini once (if found)
+2. **Load** metadata about the trip, travelers, and story beats
+3. **Detect** per-traveler voice references from `voice_references/` folder
+4. **Upload** all voice reference files to Gemini once
 5. **Process** each audio clip:
-   - Upload audio file to Gemini
-   - Send context-aware prompt with traveler info, location, timestamps
-   - Receive structured JSON analysis
+   - Build context with traveler info, location, and story beat
+   - Upload audio file to Gemini with voice references
+   - Receive structured JSON analysis with speaker identification
+   - Resolve story beat ID to full story beat object
    - Parse and validate results
 6. **Save** enriched metadata with all analysis results
 
 ## Voice Reference Best Practices
 
-The pipeline automatically detects `voice_reference.webm` in your Travel Chronicle export. For optimal speaker identification, record a voice reference where each family member:
-- Says their name clearly
-- Speaks for 2-3 seconds
-- Uses their natural voice
+The pipeline automatically detects individual voice reference files for each traveler. Voice references are stored in the `voice_references/` folder and linked via the `voiceReferenceFile` field in each traveler's metadata.
 
-Save this recording as `voice_reference.webm` and include it in your export ZIP file at the root level (not in a subdirectory).
+For optimal speaker identification, each family member should:
+- Say their name clearly
+- Speak for 2-3 seconds
+- Use their natural voice
 
-Example audio content:
+Example export structure:
 ```
-"Hi, I'm Ellen, I'm 8 years old."
-"This is Alina, age 9."
-"I'm Anne, the mom."
-"And I'm Geoff, the dad."
+trip-export.zip
+├── metadata.json
+├── audio/
+│   └── ...
+└── voice_references/
+    ├── ellen.webm
+    ├── mom.webm
+    └── dad.webm
 ```
 
 When the pipeline runs, you'll see:
-- `Voice reference found: voice_reference.webm ✓` - voice reference detected and will be used
-- `No voice reference (speaker ID may be less accurate)` - no voice reference found
+- `Voice references found: Ellen, Mom, Dad (3/4 travelers)` - voice references detected
+- `Missing voice reference: Alina` - travelers without voice references
+- `No voice references (speaker ID may be less accurate)` - no voice references found
 
 ## API Costs
 
@@ -255,7 +266,7 @@ This project uses comprehensive defensive programming tools to ensure code quali
 
 ### Running Tests
 
-The project includes a comprehensive test suite with 97% code coverage:
+The project includes a comprehensive test suite with 95% code coverage:
 
 ```bash
 # Run all tests
@@ -322,14 +333,14 @@ Error: ZIP file not found: export.zip
 ```
 **Solution:** Provide the full path to your ZIP file
 
-### Voice Reference Not Detected
+### Voice References Not Detected
 ```
-No voice reference (speaker ID may be less accurate)
+No voice references (speaker ID may be less accurate)
 ```
-**Solution:** Ensure your `voice_reference.webm` file is:
-- Named exactly `voice_reference.webm`
-- Located at the root of your export ZIP (not in a subdirectory)
-- Included in the ZIP before extraction
+**Solution:** Ensure voice references are properly configured:
+- Each traveler's `voiceReferenceFile` field points to a valid file path
+- Voice reference files exist in the `voice_references/` folder
+- File paths in metadata match actual file names (e.g., `"voice_references/ellen.webm"`)
 
 ## Contributing
 

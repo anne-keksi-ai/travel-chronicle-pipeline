@@ -7,10 +7,13 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from dotenv import load_dotenv
 from google import genai
+
+if TYPE_CHECKING:
+    from audio_utils import ConcatenatedAudio
 
 # Constants
 DEFAULT_MODEL = "gemini-3-flash-preview"
@@ -61,33 +64,71 @@ def format_traveler(traveler: dict[str, Any]) -> str:
         Formatted string like "Alice (age 9)" or "Mom"
     """
     name = str(traveler["name"])
-    if "age" in traveler:
-        return f"{name} (age {traveler['age']})"
+    # age can be missing, None, or a valid number
+    age = traveler.get("age")
+    if age is not None:
+        return f"{name} (age {age})"
     return name
+
+
+def summarize_story_beat(story_text: str, api_key: str) -> str:
+    """
+    Summarize a story beat text into a concise 1-2 sentence summary.
+
+    Args:
+        story_text: The full story beat text to summarize
+        api_key: Gemini API key
+
+    Returns:
+        A brief summary capturing the main point of the story
+    """
+    # Skip summarization for already-short texts
+    if len(story_text) < 200:
+        return story_text
+
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""Summarize this story in ONE sentence (max 30 words).
+Capture the main historical fact or interesting point being shared.
+
+Story:
+{story_text}
+
+Summary:"""
+
+    response = client.models.generate_content(model=DEFAULT_MODEL, contents=[prompt])
+
+    summary = response.text.strip() if response.text else story_text
+    # Remove any quotes that might wrap the summary
+    summary = summary.strip("\"'")
+    return summary
 
 
 def analyze_audio(
     audio_path: str,
     api_key: str,
     context: Optional[dict[str, Any]] = None,
-    voice_reference_file=None,
+    concatenated_audio: Optional["ConcatenatedAudio"] = None,
 ) -> dict[str, Any]:
     """
     Analyze an audio clip using Gemini.
 
     Args:
-        audio_path: Path to the audio file
+        audio_path: Path to the audio file (or concatenated file if concatenated_audio provided)
         api_key: Gemini API key
         context: Optional dictionary with:
             - travelers: list of {"name": "Ellen", "age": 7}, {"name": "Mom"}, etc.
             - location: "La Mina Falls, El Yunque"
             - storyBeatContext: "Story about Princess Louise-Hippolyte..."
             - recordedAt: "2024-12-28T14:34:22Z"
-        voice_reference_file: Optional already-uploaded voice reference file object
+        concatenated_audio: Optional ConcatenatedAudio object with timing information
+            for voice references and clip location in a single concatenated file
 
     Returns:
         dict with: audioType, transcript, audioEvents, sceneDescription, emotionalTone
     """
+    from audio_utils import format_timestamp
+
     # Create Gemini client
     client = genai.Client(api_key=api_key)
 
@@ -106,21 +147,32 @@ def analyze_audio(
     # Build prompt dynamically based on context
     prompt = ""
 
-    # Add voice reference instructions if provided
-    if voice_reference_file:
-        prompt += "I'm providing two audio files:\n"
-        prompt += "1. VOICE REFERENCE: A recording where each family member introduces themselves by name\n"
-        prompt += "2. CLIP TO ANALYZE: The actual audio clip to transcribe\n\n"
+    # Add voice reference instructions for concatenated audio
+    if concatenated_audio and concatenated_audio.voice_reference_segments:
+        clip_start_ts = format_timestamp(concatenated_audio.clip_start_ms)
 
-        prompt += "First, listen to the VOICE REFERENCE to learn each person's voice"
+        prompt += "This audio file contains VOICE REFERENCES followed by a CLIP TO ANALYZE.\n\n"
+        prompt += "VOICE REFERENCES (learn each person's voice):\n"
+
+        for traveler, start_ms, end_ms in concatenated_audio.voice_reference_segments:
+            start_ts = format_timestamp(start_ms)
+            end_ts = format_timestamp(end_ms)
+            prompt += f"- {format_traveler(traveler)}: {start_ts} to {end_ts}\n"
+
+        # Note travelers without voice references
         if context and context.get("travelers"):
-            prompt += ":\n"
-            for traveler in context["travelers"]:
-                prompt += f"- How {format_traveler(traveler)} sounds\n"
-        else:
-            prompt += ".\n"
+            voice_ref_names = {t["name"] for t, _, _ in concatenated_audio.voice_reference_segments}
+            missing_travelers = [
+                t for t in context["travelers"] if t["name"] not in voice_ref_names
+            ]
+            if missing_travelers:
+                missing_names = ", ".join(format_traveler(t) for t in missing_travelers)
+                prompt += f"\nNote: {missing_names} did not record a voice reference.\n"
 
-        prompt += "\nThen analyze the CLIP TO ANALYZE and identify speakers by matching their voices to the reference.\n\n"
+        prompt += f"\nCLIP TO ANALYZE: starts at {clip_start_ts}\n\n"
+        prompt += "First, listen to each voice reference segment to learn how each person sounds. "
+        prompt += f"Then analyze the clip starting at {clip_start_ts} and identify speakers by matching their voices.\n\n"
+
     else:
         prompt += "Analyze this audio clip recorded during a family trip.\n\n"
 
@@ -187,15 +239,11 @@ IMPORTANT:
 
 Respond ONLY with valid JSON, no additional text."""
 
-    # Send prompt with the audio file(s)
+    # Send prompt with the audio file
     print("Analyzing audio...")
 
-    # Build contents list - include voice reference first if provided
-    contents = []
-    if voice_reference_file:
-        contents.append(voice_reference_file)
-    contents.append(uploaded_file)
-    contents.append(prompt)
+    # Build contents list - single audio file and prompt
+    contents: list[Any] = [uploaded_file, prompt]
 
     response = client.models.generate_content(model=DEFAULT_MODEL, contents=contents)
 

@@ -3,7 +3,6 @@
 import json
 import sys
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 from conftest import WEBM_STUB
@@ -132,7 +131,7 @@ class TestProcessMain:
         assert "Transcript:" in captured.out
         assert "Alice" in captured.out or "Mom" in captured.out
 
-    def test_process_with_voice_reference(
+    def test_process_with_legacy_voice_reference(
         self,
         create_test_zip,
         sample_metadata,
@@ -142,8 +141,8 @@ class TestProcessMain:
         sample_gemini_response,
         capsys,
     ):
-        """Test processing with auto-detected voice reference file."""
-        # Create ZIP with voice reference inside
+        """Test processing with legacy voice reference file shows not supported message."""
+        # Create ZIP with legacy voice reference inside
         zip_path = create_test_zip(
             sample_metadata, name="test_with_voice", include_voice_reference=True
         )
@@ -151,17 +150,6 @@ class TestProcessMain:
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
         monkeypatch.chdir(temp_dir)
-
-        # Mock the genai module at import time
-        mock_client = Mock()
-        mock_voice_file = Mock()
-        mock_voice_file.name = "voice_reference"
-        mock_client.files.upload.return_value = mock_voice_file
-
-        # Import genai and patch it at the point it's used
-        import google.genai
-
-        mocker.patch.object(google.genai, "Client", return_value=mock_client)
 
         # Mock analyze_audio
         mock_analyze = mocker.patch("process.analyze_audio")
@@ -171,9 +159,9 @@ class TestProcessMain:
 
         captured = capsys.readouterr()
 
-        # Verify voice reference was detected and uploaded
-        assert "Voice reference found: voice_reference.webm" in captured.out
-        assert "UPLOADING VOICE REFERENCE" in captured.out
+        # Verify legacy voice reference was detected but noted as not supported
+        assert "Legacy voice reference found: voice_reference.webm" in captured.out
+        assert "Legacy format not supported" in captured.out
 
     def test_process_continues_on_clip_error(
         self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
@@ -200,23 +188,24 @@ class TestProcessMain:
         assert "Errors: 1" in captured.out
 
     def test_process_saves_enriched_metadata(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response
+        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, temp_dir
     ):
         """Test that enriched metadata is saved correctly."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
+        monkeypatch.chdir(temp_dir)  # Use temp directory to avoid polluting repo
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
 
         process.main()
 
-        # Check that enriched_metadata.json was created
-        output_file = Path("output/enriched_metadata.json")
-        assert output_file.exists()
+        # Check that enriched_metadata.json was created in versioned output dir
+        output_files = list(Path("output").glob("*/enriched_metadata.json"))
+        assert len(output_files) == 1
 
         # Load and verify content
-        with open(output_file, encoding="utf-8") as f:
+        with open(output_files[0], encoding="utf-8") as f:
             enriched = json.load(f)
 
         # Verify clips have analysis
@@ -227,11 +216,12 @@ class TestProcessMain:
                 assert "transcript" in clip["analysis"]
 
     def test_process_tracks_statistics(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys
+        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
     ):
         """Test that statistics are tracked and displayed."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
+        monkeypatch.chdir(temp_dir)  # Use temp directory to avoid polluting repo
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
@@ -419,11 +409,11 @@ class TestProcessMain:
         assert "0/1 clips successfully" in captured.out
         assert "Errors: 1" in captured.out
 
-    def test_process_dry_run_with_voice_reference(
+    def test_process_dry_run_with_legacy_voice_reference(
         self, create_test_zip, sample_metadata, temp_dir, monkeypatch, capsys
     ):
-        """Test dry-run mode with auto-detected voice reference displays correctly."""
-        # Create ZIP with voice reference inside
+        """Test dry-run mode with legacy voice reference shows not supported message."""
+        # Create ZIP with legacy voice reference inside
         zip_path = create_test_zip(
             sample_metadata, name="test_dry_voice", include_voice_reference=True
         )
@@ -435,10 +425,10 @@ class TestProcessMain:
 
         captured = capsys.readouterr()
 
-        # Verify dry run shows voice reference info
+        # Verify dry run shows legacy voice reference notice
         assert "DRY RUN MODE" in captured.out
-        assert "Voice reference found: voice_reference.webm" in captured.out
-        assert "[DRY RUN] Voice reference: voice_reference.webm" in captured.out
+        assert "Legacy voice reference found: voice_reference.webm" in captured.out
+        assert "Legacy format not supported" in captured.out
 
     def test_process_exception_during_clip_processing(
         self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
@@ -696,6 +686,36 @@ class TestProcessingStats:
         assert stats.total_audio_events == 50
 
 
+class TestGenerateOutputDir:
+    """Tests for generate_output_dir function."""
+
+    def test_generates_versioned_path(self):
+        """Test that output path includes ZIP name and timestamp."""
+        result = process.generate_output_dir("/path/to/my_trip.zip")
+
+        # Should start with output directory
+        assert "output" in result
+        # Should include ZIP name
+        assert "my_trip_" in result
+        # Should include date pattern (YYYY-MM-DD_HHMMSS)
+        import re
+
+        assert re.search(r"\d{4}-\d{2}-\d{2}_\d{6}$", result)
+
+    def test_custom_base_dir(self):
+        """Test with custom base directory."""
+        result = process.generate_output_dir("/path/to/export.zip", base_dir="/custom/output")
+
+        assert result.startswith("/custom/output/")
+        assert "export_" in result
+
+    def test_handles_path_with_spaces(self):
+        """Test handling of paths with spaces."""
+        result = process.generate_output_dir("/path/to/my trip export.zip")
+
+        assert "my trip export_" in result
+
+
 class TestDetectVoiceReference:
     """Tests for detect_voice_reference function."""
 
@@ -726,20 +746,170 @@ class TestDetectVoiceReference:
         assert result is None
 
 
+class TestLoadVoiceReferences:
+    """Tests for load_voice_references function."""
+
+    def test_load_voice_references_from_folder(self, temp_dir):
+        """Test loading voice references when folder exists with matching files."""
+        # Create voice_references folder
+        voice_refs_dir = temp_dir / "voice_references"
+        voice_refs_dir.mkdir()
+
+        # Create voice reference files
+        (voice_refs_dir / "ellen.webm").write_bytes(WEBM_STUB)
+        (voice_refs_dir / "mom.webm").write_bytes(WEBM_STUB)
+
+        # voiceReferenceFile now contains full relative path
+        travelers = [
+            {"name": "Ellen", "age": 7, "voiceReferenceFile": "voice_references/ellen.webm"},
+            {"name": "Mom", "voiceReferenceFile": "voice_references/mom.webm"},
+            {"name": "Dad", "age": None, "voiceReferenceFile": None},  # No voice reference
+        ]
+
+        result = process.load_voice_references(str(temp_dir), travelers)
+
+        assert len(result) == 2
+        assert result[0].traveler["name"] == "Ellen"
+        assert result[0].file_path.name == "ellen.webm"
+        assert result[1].traveler["name"] == "Mom"
+
+    def test_load_voice_references_no_folder(self, temp_dir):
+        """Test returns empty list when voice reference file path doesn't exist."""
+        travelers = [{"name": "Ellen", "voiceReferenceFile": "voice_references/ellen.webm"}]
+
+        result = process.load_voice_references(str(temp_dir), travelers)
+
+        assert result == []
+
+    def test_load_voice_references_missing_file(self, temp_dir):
+        """Test skips travelers with missing voice reference files."""
+        voice_refs_dir = temp_dir / "voice_references"
+        voice_refs_dir.mkdir()
+        (voice_refs_dir / "ellen.webm").write_bytes(WEBM_STUB)
+
+        travelers = [
+            {"name": "Ellen", "voiceReferenceFile": "voice_references/ellen.webm"},
+            {"name": "Mom", "voiceReferenceFile": "voice_references/missing.webm"},
+        ]
+
+        result = process.load_voice_references(str(temp_dir), travelers)
+
+        assert len(result) == 1
+        assert result[0].traveler["name"] == "Ellen"
+
+    def test_load_voice_references_null_voice_reference_file(self, temp_dir):
+        """Test skips travelers with voiceReferenceFile: null."""
+        voice_refs_dir = temp_dir / "voice_references"
+        voice_refs_dir.mkdir()
+        (voice_refs_dir / "ellen.webm").write_bytes(WEBM_STUB)
+
+        travelers = [
+            {"name": "Ellen", "voiceReferenceFile": None},  # Explicitly null
+            {"name": "Mom"},  # Field missing entirely
+        ]
+
+        result = process.load_voice_references(str(temp_dir), travelers)
+
+        assert result == []
+
+    def test_load_voice_references_empty_travelers(self, temp_dir):
+        """Test returns empty list with no travelers."""
+        voice_refs_dir = temp_dir / "voice_references"
+        voice_refs_dir.mkdir()
+        (voice_refs_dir / "test.webm").write_bytes(WEBM_STUB)
+
+        result = process.load_voice_references(str(temp_dir), [])
+
+        assert result == []
+
+
+class TestPrintVoiceReferenceSummary:
+    """Tests for print_voice_reference_summary function."""
+
+    def test_print_summary_with_all_travelers(self, capsys):
+        """Test summary when all travelers have voice references."""
+        from pathlib import Path
+
+        travelers = [
+            {"name": "Ellen", "age": 7},
+            {"name": "Mom"},
+        ]
+        voice_refs = [
+            process.VoiceReference(traveler=travelers[0], file_path=Path("/test/ellen.webm")),
+            process.VoiceReference(traveler=travelers[1], file_path=Path("/test/mom.webm")),
+        ]
+
+        process.print_voice_reference_summary(travelers, voice_refs)
+
+        captured = capsys.readouterr()
+        assert "Voice references found: Ellen (age 7), Mom (2/2 travelers)" in captured.out
+        assert "Missing voice reference" not in captured.out
+
+    def test_print_summary_with_missing_traveler(self, capsys):
+        """Test summary when some travelers are missing voice references."""
+        from pathlib import Path
+
+        travelers = [
+            {"name": "Ellen", "age": 7},
+            {"name": "Mom"},
+            {"name": "Dad"},
+        ]
+        voice_refs = [
+            process.VoiceReference(traveler=travelers[0], file_path=Path("/test/ellen.webm")),
+        ]
+
+        process.print_voice_reference_summary(travelers, voice_refs)
+
+        captured = capsys.readouterr()
+        assert "Voice references found: Ellen (age 7) (1/3 travelers)" in captured.out
+        assert "Missing voice reference: Mom, Dad" in captured.out
+
+    def test_print_summary_no_voice_references(self, capsys):
+        """Test summary when no voice references available."""
+        travelers = [{"name": "Ellen"}, {"name": "Mom"}]
+
+        process.print_voice_reference_summary(travelers, [])
+
+        captured = capsys.readouterr()
+        assert "No voice references (speaker ID may be less accurate)" in captured.out
+
+    def test_print_summary_no_travelers(self, capsys):
+        """Test summary with no travelers defined."""
+        process.print_voice_reference_summary([], [])
+
+        captured = capsys.readouterr()
+        assert "No travelers defined" in captured.out
+
+
+class TestVoiceReferenceDataclass:
+    """Tests for VoiceReference dataclass."""
+
+    def test_voice_reference_creation(self, temp_dir):
+        """Test creating a VoiceReference instance."""
+        traveler = {"name": "Ellen", "age": 7}
+        file_path = temp_dir / "ellen.webm"
+        file_path.write_bytes(WEBM_STUB)
+
+        vr = process.VoiceReference(traveler=traveler, file_path=file_path)
+
+        assert vr.traveler == traveler
+        assert vr.file_path == file_path
+
+
 class TestNoVoiceReferenceMessage:
-    """Tests for 'No voice reference' message."""
+    """Tests for 'No voice references' message."""
 
     def test_no_voice_reference_message_displayed(
         self, sample_zip_file, monkeypatch, capsys, temp_dir
     ):
-        """Test that 'No voice reference' message is displayed when not present."""
+        """Test that 'No voice references' message is displayed when not present."""
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--dry-run"])
         monkeypatch.chdir(temp_dir)
 
         process.main()
 
         captured = capsys.readouterr()
-        assert "No voice reference (speaker ID may be less accurate)" in captured.out
+        assert "No voice references (speaker ID may be less accurate)" in captured.out
 
 
 class TestPrintHeader:

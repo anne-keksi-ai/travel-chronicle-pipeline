@@ -1,6 +1,7 @@
 # Shared fixtures for Travel Chronicle Pipeline tests
 
 import json
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -228,3 +229,35 @@ def mock_genai_module(mocker, mock_gemini_client):
     mock_genai = mocker.patch("analyze.genai")
     mock_genai.Client.return_value = mock_gemini_client
     return mock_genai
+
+
+@pytest.fixture
+def create_synthetic_audio(temp_dir):
+    """
+    Factory fixture for creating synthetic audio segments.
+
+    Uses pydub tone generators to create real, decodable audio files
+    for testing audio_utils functions.
+
+    Usage:
+        def test_something(create_synthetic_audio):
+            audio_path = create_synthetic_audio(duration_ms=1000, frequency=440)
+    """
+    created_files: list[Path] = []
+
+    def _create(duration_ms: int = 1000, frequency: int = 440) -> Path:
+        from pydub.generators import Sine
+
+        tone = Sine(frequency).to_audio_segment(duration=duration_ms).apply_gain(-20)
+        audio_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=str(temp_dir))
+        tone.export(audio_file.name, format="wav")
+        audio_path = Path(audio_file.name)
+        created_files.append(audio_path)
+        return audio_path
+
+    yield _create
+
+    # Cleanup created files
+    for f in created_files:
+        if f.exists():
+            f.unlink()
