@@ -91,17 +91,29 @@ class TestProcessMain:
 
     @pytest.mark.integration
     def test_process_with_mocked_api(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
+        temp_dir,
     ):
-        """Test full processing with mocked Gemini API."""
+        """Test full processing with mocked APIs (OpenAI + Gemini)."""
         # Set environment and args
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)
 
-        # Mock analyze_audio to avoid actual API calls
+        # Mock analyze_audio (Gemini) to avoid actual API calls
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        # Mock transcription (OpenAI) to avoid actual API calls
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -113,15 +125,26 @@ class TestProcessMain:
         assert "2/2 clips successfully" in captured.out
 
     def test_process_verbose_flag(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
     ):
         """Test that --verbose flag shows transcripts."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file), "--verbose"])
 
-        # Mock analyze_audio
+        # Mock analyze_audio (Gemini)
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        # Mock transcription (OpenAI)
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -139,6 +162,7 @@ class TestProcessMain:
         monkeypatch,
         mocker,
         sample_gemini_response,
+        sample_openai_transcription,
         capsys,
     ):
         """Test processing with legacy voice reference file shows not supported message."""
@@ -148,12 +172,17 @@ class TestProcessMain:
         )
 
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
         monkeypatch.chdir(temp_dir)
 
-        # Mock analyze_audio
+        # Mock analyze_audio (Gemini)
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        # Mock transcription (OpenAI)
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -164,12 +193,24 @@ class TestProcessMain:
         assert "Legacy format not supported" in captured.out
 
     def test_process_continues_on_clip_error(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
+        temp_dir,
     ):
         """Test that processing continues when individual clips fail."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)
+
+        # Mock transcription (OpenAI)
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         # Mock analyze_audio to fail on first clip, succeed on second
         mock_analyze = mocker.patch("process.analyze_audio")
@@ -188,15 +229,25 @@ class TestProcessMain:
         assert "Errors: 1" in captured.out
 
     def test_process_saves_enriched_metadata(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        temp_dir,
     ):
         """Test that enriched metadata is saved correctly."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)  # Use temp directory to avoid polluting repo
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -216,15 +267,26 @@ class TestProcessMain:
                 assert "transcript" in clip["analysis"]
 
     def test_process_tracks_statistics(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
+        temp_dir,
     ):
         """Test that statistics are tracked and displayed."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)  # Use temp directory to avoid polluting repo
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -285,15 +347,26 @@ class TestProcessMain:
         assert "Bob" in captured.out
 
     def test_process_displays_progress_percentage(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
+        temp_dir,
     ):
         """Test that progress percentages are displayed."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         process.main()
 
@@ -304,7 +377,7 @@ class TestProcessMain:
         assert "1/2" in captured.out or "2/2" in captured.out
 
     def test_process_handles_missing_optional_fields(
-        self, temp_dir, monkeypatch, mocker, sample_gemini_response
+        self, temp_dir, monkeypatch, mocker, sample_gemini_response, sample_openai_transcription
     ):
         """Test processing clips with missing optional fields (location, storyBeat)."""
         # Create metadata with minimal clip info
@@ -342,11 +415,15 @@ class TestProcessMain:
                     zipf.write(file_path, arcname)
 
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
         monkeypatch.chdir(temp_dir)
 
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.return_value = sample_gemini_response
+
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
 
         # Should not raise an error
         process.main()
@@ -394,6 +471,7 @@ class TestProcessMain:
                     zipf.write(file_path, arcname)
 
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(zip_path)])
         monkeypatch.chdir(temp_dir)
 
@@ -431,14 +509,26 @@ class TestProcessMain:
         assert "Legacy format not supported" in captured.out
 
     def test_process_exception_during_clip_processing(
-        self, sample_zip_file, monkeypatch, mocker, sample_gemini_response, capsys, temp_dir
+        self,
+        sample_zip_file,
+        monkeypatch,
+        mocker,
+        sample_gemini_response,
+        sample_openai_transcription,
+        capsys,
+        temp_dir,
     ):
         """Test that exceptions during clip processing are caught and logged."""
         monkeypatch.setenv("GEMINI_API_KEY", "fake_key")
+        monkeypatch.setenv("OPENAI_API_KEY", "fake_openai_key")
         monkeypatch.setattr(sys, "argv", ["process.py", str(sample_zip_file)])
         monkeypatch.chdir(temp_dir)
 
-        # Mock analyze_audio to raise an exception
+        # Mock transcription
+        mock_transcribe = mocker.patch("process.transcribe_without_diarization")
+        mock_transcribe.return_value = sample_openai_transcription
+
+        # Mock analyze_audio to raise an exception on first clip
         mock_analyze = mocker.patch("process.analyze_audio")
         mock_analyze.side_effect = [
             RuntimeError("Unexpected error during analysis"),
@@ -450,7 +540,7 @@ class TestProcessMain:
         captured = capsys.readouterr()
 
         # Verify exception was caught and processing continued
-        assert "Error:" in captured.out
+        assert "Processing failed:" in captured.out
         assert "Unexpected error" in captured.out
         assert "1/2 clips successfully" in captured.out
         assert "Errors: 1" in captured.out

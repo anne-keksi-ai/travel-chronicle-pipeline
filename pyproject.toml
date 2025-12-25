@@ -9,6 +9,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydub>=0.25.0",
     "audioop-lts>=0.2.0; python_version>='3.13'",  # Required for pydub on Python 3.13+
+    "openai>=2.14.0",
 ]
 
 [project.urls]

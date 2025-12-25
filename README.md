@@ -1,9 +1,9 @@
 # Travel Chronicle Pipeline
 
-AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
+AI-powered audio analysis pipeline for Travel Chronicle using a hybrid approach: **OpenAI** for transcription with speaker diarization and **Gemini 3 Flash** for scene analysis. Automatically transcribes family audio clips with speaker identification, scene descriptions, and emotional tone analysis.
 
-[![Tests](https://img.shields.io/badge/tests-111%20passing-success)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-95%25-success)](htmlcov/)
+[![Tests](https://img.shields.io/badge/tests-128%20passing-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-92%25-success)](htmlcov/)
 [![Type Checked](https://img.shields.io/badge/mypy-passing-success)](pyproject.toml)
 [![Security](https://img.shields.io/badge/bandit-passing-success)](pyproject.toml)
 [![Code Style](https://img.shields.io/badge/code%20style-ruff-000000)](https://docs.astral.sh/ruff/)
@@ -28,7 +28,8 @@ AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Au
 
 - Python 3.9 or higher
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key)
+- [OpenAI API key](https://platform.openai.com/api-keys) (for transcription)
+- [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key) (for analysis)
 
 ### Setup
 
@@ -66,10 +67,13 @@ AI-powered audio analysis pipeline for Travel Chronicle using Gemini 3 Flash. Au
 Create a `.env` file in the project root:
 
 ```bash
+OPENAI_API_KEY=your_openai_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-Get your API key from [Google AI Studio](https://ai.google.dev/gemini-api/docs/api-key).
+Get your API keys from:
+- **OpenAI**: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Gemini**: [Google AI Studio](https://ai.google.dev/gemini-api/docs/api-key)
 
 ## Usage
 
@@ -184,13 +188,17 @@ Totals:
 
 ```
 travel-chronicle-pipeline/
-├── analyze.py              # Core audio analysis with Gemini API
-├── process.py              # Main pipeline for batch processing
+├── process.py              # Main pipeline (orchestrates both APIs)
+├── transcribe.py           # OpenAI transcription with speaker diarization
+├── analyze.py              # Gemini audio analysis (scene understanding)
+├── audio_utils.py          # Audio file utilities
 ├── utils.py                # Helper functions (ZIP extraction, JSON handling)
-├── tests/                  # Comprehensive test suite (111 tests, 95% coverage)
+├── tests/                  # Comprehensive test suite (128 tests, 92% coverage)
 │   ├── conftest.py         # Shared test fixtures
 │   ├── test_analyze.py     # Tests for audio analysis
+│   ├── test_transcribe.py  # Tests for transcription
 │   ├── test_process.py     # Tests for main pipeline
+│   ├── test_audio_utils.py # Tests for audio utilities
 │   └── test_utils.py       # Tests for utility functions
 ├── pyproject.toml          # Project metadata and dependencies (uv)
 ├── uv.lock                 # Locked dependency versions
@@ -205,17 +213,20 @@ travel-chronicle-pipeline/
 
 ## How It Works
 
+The pipeline uses a **hybrid approach** combining OpenAI and Gemini:
+
 1. **Extract** the Travel Chronicle export ZIP
 2. **Load** metadata about the trip, travelers, and story beats
 3. **Detect** per-traveler voice references from `voice_references/` folder
-4. **Upload** all voice reference files to Gemini once
+4. **Encode** voice references as base64 data URLs for OpenAI
 5. **Process** each audio clip:
-   - Build context with traveler info, location, and story beat
-   - Upload audio file to Gemini with voice references
-   - Receive structured JSON analysis with speaker identification
+   - **OpenAI** (`gpt-4o-transcribe-diarize`): Transcribe with speaker identification using voice references
+   - **Gemini** (`gemini-3-flash-preview`): Analyze for audioType, audioEvents, sceneDescription, emotionalTone
+   - **Merge** results from both APIs
    - Resolve story beat ID to full story beat object
-   - Parse and validate results
 6. **Save** enriched metadata with all analysis results
+
+**Why hybrid?** OpenAI provides superior speaker diarization with explicit voice reference support, while Gemini excels at scene understanding and audio event detection.
 
 ## Voice Reference Best Practices
 
@@ -245,12 +256,23 @@ When the pipeline runs, you'll see:
 
 ## API Costs
 
-This pipeline uses Google's Gemini 3 Flash API. Costs depend on:
-- Number of audio clips
-- Length of each clip
-- Whether voice references are used
+This pipeline uses both OpenAI and Gemini APIs:
 
-Check current pricing at [Google AI Pricing](https://ai.google.dev/pricing).
+**OpenAI (Transcription):**
+- Model: `gpt-4o-transcribe-diarize`
+- Cost: ~$0.006/min
+- 50 clips (30 sec avg) ≈ $0.15
+
+**Gemini (Analysis):**
+- Model: `gemini-3-flash-preview`
+- Cost: ~$0.001/clip
+- 50 clips ≈ $0.05
+
+**Total estimate:** ~$0.20 for 50 clips
+
+Check current pricing:
+- [OpenAI Pricing](https://openai.com/pricing)
+- [Google AI Pricing](https://ai.google.dev/pricing)
 
 ## Development
 
@@ -266,7 +288,7 @@ This project uses comprehensive defensive programming tools to ensure code quali
 
 ### Running Tests
 
-The project includes a comprehensive test suite with 95% code coverage:
+The project includes a comprehensive test suite with 92% code coverage:
 
 ```bash
 # Run all tests
@@ -324,8 +346,9 @@ For more detailed development documentation, see [CLAUDE.md](CLAUDE.md).
 ### API Key Not Found
 ```
 Error: GEMINI_API_KEY not found in .env file
+Error: OPENAI_API_KEY not found in .env file
 ```
-**Solution:** Create a `.env` file with your API key (see Configuration section)
+**Solution:** Create a `.env` file with both API keys (see Configuration section)
 
 ### File Not Found
 ```
@@ -368,7 +391,8 @@ MIT License - see LICENSE file for details
 
 ## Acknowledgments
 
-- Built with [Google Gemini 3 Flash](https://ai.google.dev/gemini-api)
+- Transcription by [OpenAI gpt-4o-transcribe-diarize](https://platform.openai.com/docs/models/gpt-4o-transcribe-diarize)
+- Analysis by [Google Gemini 3 Flash](https://ai.google.dev/gemini-api)
 - Part of the Travel Chronicle ecosystem
 - 🤖 Developed with [Claude Code](https://claude.com/claude-code)
 

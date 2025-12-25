@@ -13,7 +13,10 @@ class TestAnalyzeAudio:
     def test_analyze_basic_audio_file(
         self, temp_dir, mock_genai_module, mock_gemini_client, sample_gemini_response
     ):
-        """Test basic audio analysis without context."""
+        """Test basic audio analysis without context.
+
+        Note: Transcript is NOT included - it's now handled by OpenAI.
+        """
         # Create a dummy audio file
         audio_path = temp_dir / "test_audio.webm"
         audio_path.write_bytes(b"\x1a\x45\xdf\xa3")  # Minimal WebM header
@@ -25,9 +28,8 @@ class TestAnalyzeAudio:
         mock_gemini_client.files.upload.assert_called_once()
         mock_gemini_client.models.generate_content.assert_called_once()
 
-        # Verify result structure
+        # Verify result structure (no transcript - handled by OpenAI)
         assert result["audioType"] == "speech"
-        assert "transcript" in result
         assert "audioEvents" in result
         assert "sceneDescription" in result
         assert "emotionalTone" in result
@@ -36,7 +38,11 @@ class TestAnalyzeAudio:
     def test_analyze_with_full_context(
         self, temp_dir, mock_genai_module, mock_gemini_client, sample_gemini_response
     ):
-        """Test audio analysis with full context."""
+        """Test audio analysis with full context.
+
+        Note: Travelers are no longer included in the Gemini prompt since
+        speaker identification is now handled by OpenAI's gpt-4o-transcribe-diarize.
+        """
         audio_path = temp_dir / "test_audio.webm"
         audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
 
@@ -53,12 +59,10 @@ class TestAnalyzeAudio:
 
         result = analyze_audio(str(audio_path), "fake_api_key", context=context)
 
-        # Verify the prompt includes context
+        # Verify the prompt includes context (but NOT travelers - handled by OpenAI)
         call_args = mock_gemini_client.models.generate_content.call_args
         prompt = call_args[1]["contents"][-1]
 
-        assert "Alice" in prompt
-        assert "age 9" in prompt
         assert "Golden Gate Bridge" in prompt
         assert "bridge construction" in prompt
         assert "December 22, 2025" in prompt
@@ -66,73 +70,6 @@ class TestAnalyzeAudio:
         # Verify result
         assert result["audioType"] == "speech"
         assert result["_meta"]["context"] == context
-
-    def test_analyze_with_concatenated_audio(self, temp_dir, mock_genai_module, mock_gemini_client):
-        """Test audio analysis with concatenated audio (voice references + clip)."""
-        from audio_utils import ConcatenatedAudio
-
-        audio_path = temp_dir / "test_audio.webm"
-        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
-
-        # Create mock concatenated audio with timing info
-        concatenated = ConcatenatedAudio(
-            file_path=audio_path,
-            voice_reference_segments=[
-                ({"name": "Alice", "age": 9}, 0, 3000),  # 0:00 to 0:03
-                ({"name": "Bob", "age": 7}, 3000, 6000),  # 0:03 to 0:06
-            ],
-            clip_start_ms=6000,
-            clip_end_ms=36000,
-            total_duration_ms=36000,
-        )
-
-        context = {"travelers": [{"name": "Alice", "age": 9}, {"name": "Bob", "age": 7}]}
-
-        result = analyze_audio(
-            str(audio_path), "fake_api_key", context=context, concatenated_audio=concatenated
-        )
-
-        # Verify the prompt mentions voice references with timestamps
-        call_args = mock_gemini_client.models.generate_content.call_args
-        prompt = call_args[1]["contents"][-1]
-
-        assert "VOICE REFERENCES" in prompt
-        assert "CLIP TO ANALYZE" in prompt
-        assert "Alice (age 9)" in prompt
-        assert "00:00 to 00:03" in prompt
-        assert "Bob (age 7)" in prompt
-        assert "00:03 to 00:06" in prompt
-        assert "starts at 00:06" in prompt
-
-        # Verify contents has single audio file + prompt
-        contents = call_args[1]["contents"]
-        assert len(contents) == 2  # audio file, prompt
-
-        # Verify result is valid
-        assert "audioType" in result
-
-    def test_analyze_with_travelers_no_age(
-        self, temp_dir, mock_genai_module, mock_gemini_client, webm_stub_file
-    ):
-        """Test context with travelers without age field."""
-        audio_path = webm_stub_file
-
-        context = {"travelers": [{"name": "Mom"}, {"name": "Dad"}]}
-
-        result = analyze_audio(str(audio_path), "fake_api_key", context=context)
-
-        # Verify prompt includes names but no age
-        call_args = mock_gemini_client.models.generate_content.call_args
-        prompt = call_args[1]["contents"][-1]
-
-        assert "Mom" in prompt
-        assert "Dad" in prompt
-        # Travelers without age should not have "(age X)" appended
-        assert "Mom (age" not in prompt
-        assert "Dad (age" not in prompt
-
-        # Verify result is valid
-        assert "audioType" in result
 
     def test_analyze_json_in_markdown_code_block(
         self, temp_dir, mock_genai_module, mock_gemini_client
@@ -306,51 +243,6 @@ class TestAnalyzeAudio:
 
         assert "A regular story" in prompt
         assert "starred as a favorite" not in prompt
-        assert "audioType" in result
-
-    def test_analyze_concatenated_audio_notes_missing_travelers(
-        self, temp_dir, mock_genai_module, mock_gemini_client
-    ):
-        """Test that concatenated audio notes travelers without voice references."""
-        from audio_utils import ConcatenatedAudio
-
-        audio_path = temp_dir / "test_audio.webm"
-        audio_path.write_bytes(b"\x1a\x45\xdf\xa3")
-
-        # Concatenated audio with only one voice reference
-        concatenated = ConcatenatedAudio(
-            file_path=audio_path,
-            voice_reference_segments=[
-                ({"name": "Alice", "age": 9}, 0, 3000),
-            ],
-            clip_start_ms=3000,
-            clip_end_ms=33000,
-            total_duration_ms=33000,
-        )
-
-        # Context with additional travelers not in voice references
-        context = {
-            "travelers": [
-                {"name": "Alice", "age": 9},
-                {"name": "Bob", "age": 7},
-                {"name": "Mom"},
-            ],
-            "location": "Some Place",
-        }
-
-        result = analyze_audio(
-            str(audio_path), "fake_api_key", context=context, concatenated_audio=concatenated
-        )
-
-        # Verify the prompt notes missing voice references
-        call_args = mock_gemini_client.models.generate_content.call_args
-        prompt = call_args[1]["contents"][-1]
-
-        assert "Alice (age 9)" in prompt
-        assert "Bob (age 7)" in prompt or "Mom" in prompt  # Missing travelers noted
-        assert "did not record a voice reference" in prompt
-
-        # Verify result is valid
         assert "audioType" in result
 
     def test_analyze_handles_none_response_text(

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# Travel Chronicle - Audio Analysis
+# Travel Chronicle - Audio Analysis (Gemini)
+#
+# This module handles non-transcript audio analysis using Gemini:
+# - audioType (speech/ambient/mixed/music/silent)
+# - audioEvents (non-speech sounds)
+# - sceneDescription
+# - emotionalTone
+#
+# Transcription with speaker diarization is handled by transcribe.py (OpenAI)
 
 import json
 import os
@@ -7,13 +15,10 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from google import genai
-
-if TYPE_CHECKING:
-    from audio_utils import ConcatenatedAudio
 
 # Constants
 DEFAULT_MODEL = "gemini-3-flash-preview"
@@ -108,27 +113,29 @@ def analyze_audio(
     audio_path: str,
     api_key: str,
     context: Optional[dict[str, Any]] = None,
-    concatenated_audio: Optional["ConcatenatedAudio"] = None,
 ) -> dict[str, Any]:
     """
-    Analyze an audio clip using Gemini.
+    Analyze an audio clip using Gemini for non-transcript analysis.
+
+    This function extracts:
+    - audioType (speech/ambient/mixed/music/silent)
+    - audioEvents (non-speech sounds with timestamps)
+    - sceneDescription (what's happening in the clip)
+    - emotionalTone (mood/feeling)
+
+    Transcription with speaker diarization is handled separately by transcribe.py
 
     Args:
-        audio_path: Path to the audio file (or concatenated file if concatenated_audio provided)
+        audio_path: Path to the audio file
         api_key: Gemini API key
         context: Optional dictionary with:
-            - travelers: list of {"name": "Ellen", "age": 7}, {"name": "Mom"}, etc.
             - location: "La Mina Falls, El Yunque"
             - storyBeatContext: "Story about Princess Louise-Hippolyte..."
             - recordedAt: "2024-12-28T14:34:22Z"
-        concatenated_audio: Optional ConcatenatedAudio object with timing information
-            for voice references and clip location in a single concatenated file
 
     Returns:
-        dict with: audioType, transcript, audioEvents, sceneDescription, emotionalTone
+        dict with: audioType, audioEvents, sceneDescription, emotionalTone
     """
-    from audio_utils import format_timestamp
-
     # Create Gemini client
     client = genai.Client(api_key=api_key)
 
@@ -137,52 +144,18 @@ def analyze_audio(
     if not audio_file.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    print(f"Uploading audio file: {audio_file.name}")
+    print(f"Uploading audio file for analysis: {audio_file.name}")
 
     # Upload the audio file with explicit mime type
     with open(audio_file, "rb") as f:
         uploaded_file = client.files.upload(file=f, config={"mime_type": DEFAULT_AUDIO_MIME_TYPE})
     print(f"Upload complete. File name: {uploaded_file.name}")
 
-    # Build prompt dynamically based on context
-    prompt = ""
-
-    # Add voice reference instructions for concatenated audio
-    if concatenated_audio and concatenated_audio.voice_reference_segments:
-        clip_start_ts = format_timestamp(concatenated_audio.clip_start_ms)
-
-        prompt += "This audio file contains VOICE REFERENCES followed by a CLIP TO ANALYZE.\n\n"
-        prompt += "VOICE REFERENCES (learn each person's voice):\n"
-
-        for traveler, start_ms, end_ms in concatenated_audio.voice_reference_segments:
-            start_ts = format_timestamp(start_ms)
-            end_ts = format_timestamp(end_ms)
-            prompt += f"- {format_traveler(traveler)}: {start_ts} to {end_ts}\n"
-
-        # Note travelers without voice references
-        if context and context.get("travelers"):
-            voice_ref_names = {t["name"] for t, _, _ in concatenated_audio.voice_reference_segments}
-            missing_travelers = [
-                t for t in context["travelers"] if t["name"] not in voice_ref_names
-            ]
-            if missing_travelers:
-                missing_names = ", ".join(format_traveler(t) for t in missing_travelers)
-                prompt += f"\nNote: {missing_names} did not record a voice reference.\n"
-
-        prompt += f"\nCLIP TO ANALYZE: starts at {clip_start_ts}\n\n"
-        prompt += "First, listen to each voice reference segment to learn how each person sounds. "
-        prompt += f"Then analyze the clip starting at {clip_start_ts} and identify speakers by matching their voices.\n\n"
-
-    else:
-        prompt += "Analyze this audio clip recorded during a family trip.\n\n"
+    # Build prompt
+    prompt = "Analyze this audio clip recorded during a family trip.\n\n"
 
     if context:
         prompt += "CONTEXT:\n"
-
-        # Add traveler information
-        if context.get("travelers"):
-            travelers_str = ", ".join(format_traveler(t) for t in context["travelers"])
-            prompt += f"- Travelers: {travelers_str}\n"
 
         # Add location
         if context.get("location"):
@@ -203,18 +176,11 @@ def analyze_audio(
 
         prompt += "\nGiven this context, analyze the audio.\n\n"
 
-    # Add analysis instructions
+    # Add analysis instructions (no transcript - handled by OpenAI)
     prompt += """Analyze the audio and respond with JSON in this exact format:
 
 {
   "audioType": "speech|ambient|mixed|music|silent",
-  "transcript": [
-    {
-      "timestamp": "00:00",
-      "speaker": "Dad",
-      "text": "How is it, girls?"
-    }
-  ],
   "audioEvents": [
     {
       "timestamp": "00:01",
@@ -227,35 +193,24 @@ def analyze_audio(
 
 IMPORTANT:
 - audioType: Choose one of: speech, ambient, mixed, music, silent
-- transcript: Array of dialogue with timestamps. """
-
-    if context and context.get("travelers"):
-        prompt += "Use actual traveler names if you can identify them (e.g., 'Ellen' instead of 'Child'). "
-
-    prompt += """If unsure, use 'Child', 'Adult Female', or 'Adult Male'.
-- audioEvents: Non-speech sounds (background noise, ambient sounds, etc.)
-- sceneDescription: 1-2 sentences describing what's happening
+- audioEvents: Non-speech sounds (background noise, ambient sounds, etc.) with timestamps
+- sceneDescription: 1-2 sentences describing what's happening in the scene
 - emotionalTone: Overall mood/feeling of the clip
+
+Note: Do NOT include a transcript - speech transcription is handled separately.
 
 Respond ONLY with valid JSON, no additional text."""
 
     # Send prompt with the audio file
-    print("Analyzing audio...")
+    print("Analyzing audio with Gemini...")
 
-    # Build contents list - single audio file and prompt
     contents: list[Any] = [uploaded_file, prompt]
-
     response = client.models.generate_content(model=DEFAULT_MODEL, contents=contents)
 
     # Parse the JSON response
     try:
-        # Extract the response text
         response_text = response.text if response.text else ""
-
-        # Extract JSON from potential markdown code blocks
         json_text = extract_json_from_text(response_text)
-
-        # Parse the JSON
         result: dict[str, Any] = json.loads(json_text)
 
         # Add metadata
@@ -264,7 +219,6 @@ Respond ONLY with valid JSON, no additional text."""
         return result
 
     except json.JSONDecodeError as e:
-        # If JSON parsing fails, return error with raw text
         print(f"Warning: Failed to parse JSON response: {e}")
         return {
             "error": "Failed to parse JSON response",

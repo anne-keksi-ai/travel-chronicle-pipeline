@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # Travel Chronicle - Audio Processing Pipeline
+#
+# Hybrid approach:
+# - OpenAI gpt-4o-transcribe-diarize for transcript with speaker identification
+# - Gemini 3 Flash for audioType, audioEvents, sceneDescription, emotionalTone
 
 import argparse
 import os
@@ -12,7 +16,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 from analyze import analyze_audio, summarize_story_beat
-from audio_utils import ConcatenatedAudio, cleanup_concatenated_audio, concatenate_audio_files
+from transcribe import transcribe_with_diarization, transcribe_without_diarization
 from utils import extract_zip, load_metadata, save_metadata
 
 # Constants
@@ -42,6 +46,14 @@ def generate_output_dir(zip_path: str, base_dir: str = DEFAULT_OUTPUT_BASE) -> s
     output_dir = Path(base_dir) / f"{zip_name}_{timestamp}"
 
     return str(output_dir)
+
+
+@dataclass
+class ApiKeys:
+    """API keys for the pipeline."""
+
+    gemini: str
+    openai: str
 
 
 @dataclass
@@ -134,16 +146,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def validate_inputs(zip_path: str, dry_run: bool) -> Optional[str]:
+def validate_inputs(zip_path: str, dry_run: bool) -> Optional[ApiKeys]:
     """
-    Validate input files and load API key.
+    Validate input files and load API keys.
 
     Args:
         zip_path: Path to the ZIP file
-        dry_run: Whether this is a dry run (API key not required)
+        dry_run: Whether this is a dry run (API keys not required)
 
     Returns:
-        API key if not dry run, None otherwise
+        ApiKeys if not dry run, None otherwise
 
     Raises:
         SystemExit: If validation fails
@@ -153,16 +165,22 @@ def validate_inputs(zip_path: str, dry_run: bool) -> Optional[str]:
         print(f"Error: ZIP file not found: {zip_path}")
         sys.exit(1)
 
-    # Load environment variables and get API key
+    # Load environment variables and get API keys
     load_dotenv()
-    api_key = None
-    if not dry_run:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            print("Error: GEMINI_API_KEY not found in .env file", file=sys.stderr)
-            sys.exit(1)
+    if dry_run:
+        return None
 
-    return api_key
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        print("Error: GEMINI_API_KEY not found in .env file", file=sys.stderr)
+        sys.exit(1)
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        print("Error: OPENAI_API_KEY not found in .env file", file=sys.stderr)
+        sys.exit(1)
+
+    return ApiKeys(gemini=gemini_key, openai=openai_key)
 
 
 def detect_voice_reference(extracted_folder: str) -> Optional[Path]:
@@ -367,61 +385,71 @@ def process_single_clip(
     clip: dict[str, Any],
     audio_path: Path,
     context: dict[str, Any],
-    api_key: str,
+    api_keys: ApiKeys,
     voice_references: list[VoiceReference],
     verbose: bool,
     stats: ProcessingStats,
 ) -> None:
     """
-    Process a single audio clip.
+    Process a single audio clip using hybrid approach.
+
+    Uses OpenAI for transcription with speaker diarization,
+    and Gemini for audioType, audioEvents, sceneDescription, emotionalTone.
 
     Args:
         clip: Clip metadata (modified in place)
         audio_path: Path to audio file
         context: Context dictionary
-        api_key: Gemini API key
-        voice_references: List of voice references to concatenate with the clip
+        api_keys: API keys for both services
+        voice_references: List of voice references for speaker identification
         verbose: Whether to show verbose output
         stats: Statistics object (modified in place)
     """
-    concatenated: Optional[ConcatenatedAudio] = None
-
     try:
-        # Concatenate voice references with the clip if we have voice references
-        if voice_references:
-            voice_ref_files = [(vr.traveler, vr.file_path) for vr in voice_references]
-            concatenated = concatenate_audio_files(voice_ref_files, audio_path)
-            analysis_path = str(concatenated.file_path)
-        else:
-            analysis_path = str(audio_path)
+        # Step 1: Transcribe with OpenAI (speaker diarization)
+        voice_ref_tuples = [(vr.traveler, vr.file_path) for vr in voice_references]
 
-        result = analyze_audio(
-            analysis_path,
-            api_key,
+        if voice_ref_tuples:
+            transcription_result = transcribe_with_diarization(
+                audio_path,
+                voice_ref_tuples,
+                api_keys.openai,
+            )
+        else:
+            transcription_result = transcribe_without_diarization(
+                audio_path,
+                api_keys.openai,
+            )
+
+        transcript = transcription_result.get("transcript", [])
+
+        # Step 2: Analyze with Gemini (audioType, audioEvents, sceneDescription, emotionalTone)
+        analysis_result = analyze_audio(
+            str(audio_path),
+            api_keys.gemini,
             context=context,
-            concatenated_audio=concatenated,
         )
 
         # Check if analysis succeeded
-        if "error" in result:
-            print(f"  ⚠️  Analysis failed: {result['error']}")
+        if "error" in analysis_result:
+            print(f"  ⚠️  Analysis failed: {analysis_result['error']}")
             clip["analysis"] = None
-            clip["analysisError"] = result["error"]
+            clip["analysisError"] = analysis_result["error"]
             stats.error_count += 1
         else:
-            # Add results to clip (exclude _meta for cleaner output)
+            # Merge results from both APIs
             clip["analysis"] = {
-                "audioType": result.get("audioType"),
-                "transcript": result.get("transcript"),
-                "audioEvents": result.get("audioEvents"),
-                "sceneDescription": result.get("sceneDescription"),
-                "emotionalTone": result.get("emotionalTone"),
+                "audioType": analysis_result.get("audioType"),
+                "transcript": transcript,  # From OpenAI
+                "audioEvents": analysis_result.get("audioEvents"),
+                "sceneDescription": analysis_result.get("sceneDescription"),
+                "emotionalTone": analysis_result.get("emotionalTone"),
             }
 
             # Update statistics
-            utterance_count = len(result.get("transcript", []))
-            event_count = len(result.get("audioEvents", []))
-            audio_type = result.get("audioType", "unknown")
+            utterance_count = len(transcript)
+            event_count = len(analysis_result.get("audioEvents", []))
+            audio_type = analysis_result.get("audioType", "unknown")
 
             stats.audio_type_counts[audio_type] = stats.audio_type_counts.get(audio_type, 0) + 1
             stats.total_utterances += utterance_count
@@ -431,9 +459,9 @@ def process_single_clip(
             print(f"  ✓ {audio_type}, {utterance_count} utterances, {event_count} audio events")
 
             # Show verbose output if requested
-            if verbose and result.get("transcript"):
+            if verbose and transcript:
                 print("\n  Transcript:")
-                for utterance in result["transcript"]:
+                for utterance in transcript:
                     speaker = utterance.get("speaker", "Unknown")
                     text = utterance.get("text", "")
                     timestamp = utterance.get("timestamp", "00:00")
@@ -441,10 +469,11 @@ def process_single_clip(
 
             stats.processed_count += 1
 
-    finally:
-        # Clean up the concatenated audio file
-        if concatenated:
-            cleanup_concatenated_audio(concatenated)
+    except Exception as e:
+        print(f"  ⚠️  Processing failed: {e}")
+        clip["analysis"] = None
+        clip["analysisError"] = str(e)
+        stats.error_count += 1
 
 
 def process_clips(
@@ -453,13 +482,13 @@ def process_clips(
     travelers: list[dict[str, Any]],
     story_beats_lookup: dict[str, dict[str, Any]],
     story_beat_summaries: dict[str, str],
-    api_key: Optional[str],
+    api_keys: Optional[ApiKeys],
     voice_references: list[VoiceReference],
     verbose: bool,
     dry_run: bool,
 ) -> ProcessingStats:
     """
-    Process all clips.
+    Process all clips using hybrid approach (OpenAI + Gemini).
 
     Args:
         clips: List of clip metadata
@@ -467,8 +496,8 @@ def process_clips(
         travelers: List of traveler information
         story_beats_lookup: Dictionary mapping story beat IDs to their data
         story_beat_summaries: Dictionary mapping story beat IDs to summaries
-        api_key: Gemini API key (None for dry run)
-        voice_references: List of voice references to concatenate with each clip
+        api_keys: API keys for OpenAI and Gemini (None for dry run)
+        voice_references: List of voice references for speaker identification
         verbose: Whether to show verbose output
         dry_run: Whether this is a dry run
 
@@ -525,18 +554,18 @@ def process_clips(
                 if voice_references:
                     voice_ref_names = [format_traveler(vr.traveler) for vr in voice_references]
                     print(f"  [DRY RUN] Voice references: {', '.join(voice_ref_names)}")
-                    print("  [DRY RUN] Would concatenate voice refs + clip into single file")
+                    print("  [DRY RUN] Would use OpenAI for transcription + Gemini for analysis")
                 continue
 
             # Analyze the audio
-            if api_key is None:
-                raise ValueError("API key is required for audio analysis")
+            if api_keys is None:
+                raise ValueError("API keys are required for audio analysis")
 
             process_single_clip(
                 clip,
                 audio_path,
                 context,
-                api_key,
+                api_keys,
                 voice_references,
                 verbose,
                 stats,
@@ -603,7 +632,7 @@ def main() -> None:
     verbose = args.verbose
     dry_run = args.dry_run
 
-    api_key = validate_inputs(zip_path, dry_run)
+    api_keys = validate_inputs(zip_path, dry_run)
 
     try:
         output_dir = generate_output_dir(zip_path)
@@ -628,7 +657,7 @@ def main() -> None:
             # Individual voice references (new format)
             print_voice_reference_summary(travelers, voice_references)
         elif voice_reference_path:
-            # Legacy single voice reference - not currently supported with concatenation
+            # Legacy single voice reference - not currently supported
             print(f"\nLegacy voice reference found: {VOICE_REFERENCE_FILENAME}")
             print("Note: Legacy format not supported. Please use individual voice references.")
         else:
@@ -636,17 +665,17 @@ def main() -> None:
 
         # Summarize story beats (skip in dry run mode)
         story_beat_summaries: dict[str, str] = {}
-        if not dry_run and api_key and story_beats_lookup:
-            story_beat_summaries = summarize_story_beats(story_beats_lookup, api_key)
+        if not dry_run and api_keys and story_beats_lookup:
+            story_beat_summaries = summarize_story_beats(story_beats_lookup, api_keys.gemini)
 
-        # Process all clips (voice references are concatenated with each clip)
+        # Process all clips using hybrid approach (OpenAI + Gemini)
         stats = process_clips(
             clips,
             extracted_folder,
             travelers,
             story_beats_lookup,
             story_beat_summaries,
-            api_key,
+            api_keys,
             voice_references,
             verbose,
             dry_run,

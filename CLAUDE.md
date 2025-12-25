@@ -11,21 +11,55 @@ A Python script that processes audio exports from the Red Button app, analyzing 
 
 - **Python 3.9+**
 - **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (replaces pip + venv)
-- **Google Gemini 3 Flash** — handles everything: transcription, timestamps, speaker ID, audio description
+- **OpenAI gpt-4o-transcribe-diarize** — transcription with speaker diarization (uses voice references)
+- **Google Gemini 3 Flash** — audio analysis (audioType, audioEvents, sceneDescription, emotionalTone)
 - **python-dotenv** — for loading API keys from .env file
+
+### Hybrid Pipeline Architecture
+
+The pipeline uses a hybrid approach combining two AI services:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Audio Clip                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────────┐
+│  OpenAI gpt-4o-transcribe│     │  Gemini 3 Flash             │
+│  -diarize                │     │                             │
+│                         │     │  - audioType                │
+│  - transcript[]         │     │  - audioEvents[]            │
+│    (with speakers)      │     │  - sceneDescription         │
+│                         │     │  - emotionalTone            │
+└─────────────────────────┘     └─────────────────────────────┘
+              │                               │
+              └───────────────┬───────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Combined Result                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Why hybrid?** OpenAI's transcription model provides superior speaker diarization with explicit voice reference support, while Gemini excels at scene understanding and audio event detection.
 
 ## File Structure
 
 ```
 travel-chronicle-pipeline/
-├── process.py              # Main entry point
-├── analyze.py              # Gemini audio analysis
-├── utils.py                # Helper functions
-├── tests/                  # Test suite
+├── process.py              # Main entry point (orchestrates both APIs)
+├── analyze.py              # Gemini audio analysis (non-transcript)
+├── transcribe.py           # OpenAI transcription with speaker diarization
+├── audio_utils.py          # Audio file utilities
+├── utils.py                # Helper functions (ZIP, JSON)
+├── tests/                  # Test suite (128 tests, 92% coverage)
 │   ├── conftest.py         # Shared test fixtures
 │   ├── test_utils.py       # Tests for utils.py
 │   ├── test_analyze.py     # Tests for analyze.py
-│   └── test_process.py     # Tests for process.py
+│   ├── test_process.py     # Tests for process.py
+│   ├── test_audio_utils.py # Tests for audio_utils.py
+│   └── test_transcribe.py  # Tests for transcribe.py (TODO)
 ├── pyproject.toml          # Project config & dependencies (uv)
 ├── uv.lock                 # Locked dependency versions
 ├── .pre-commit-config.yaml # Pre-commit hooks configuration
@@ -116,7 +150,7 @@ tests/
 
 **Coverage:**
 - Coverage reports are generated in HTML format at `htmlcov/index.html`
-- Current coverage: 95% (111 tests)
+- Current coverage: 92% (128 tests)
 - Target: >80% code coverage
 - Configuration is in `pyproject.toml` under `[tool.pytest.ini_options]`
 
@@ -230,7 +264,12 @@ git commit -m "Your message"
 Create a `.env` file:
 ```
 GEMINI_API_KEY=AI...
+OPENAI_API_KEY=sk-...
 ```
+
+Both API keys are required for the hybrid pipeline:
+- **GEMINI_API_KEY**: For audio analysis (audioType, audioEvents, sceneDescription, emotionalTone)
+- **OPENAI_API_KEY**: For transcription with speaker diarization
 
 ## Input Format
 
@@ -354,59 +393,96 @@ Key additions:
 - `clips[].analysis`: All Gemini analysis results grouped under `analysis` key
 - Speaker names use actual traveler names when voice references are provided
 
-## Core Function: analyze_audio()
+## Core Functions
 
-Single Gemini call that returns everything:
+The pipeline uses two core functions for the hybrid approach:
+
+### transcribe_with_diarization() - OpenAI
+
+Transcribes audio with speaker identification using voice references:
 
 ```python
-import google.generativeai as genai
+from openai import OpenAI
 
-def analyze_audio(audio_path: str, api_key: str) -> dict:
+def transcribe_with_diarization(
+    clip_path: Path,
+    voice_references: list[tuple[dict, Path]],
+    api_key: str,
+) -> dict:
     """
-    Analyze an audio clip using Gemini.
-    Returns: audioType, transcript, audioEvents, sceneDescription, emotionalTone
+    Transcribe with speaker diarization using OpenAI.
+    Returns: transcript with speaker names matched to voice references
     """
-    genai.configure(api_key=api_key)
+    client = OpenAI(api_key=api_key)
 
-    # Upload file to Gemini
-    audio_file = genai.upload_file(audio_path)
+    # Encode voice references as base64 data URLs
+    known_speaker_names = [t["name"] for t, _ in voice_references]
+    known_speaker_references = [encode_audio_as_data_url(p) for _, p in voice_references]
 
-    # Analyze with Gemini
-    model = genai.GenerativeModel("gemini-3-flash-preview")
+    with open(clip_path, "rb") as audio_file:
+        response = client.audio.transcriptions.create(
+            model="gpt-4o-transcribe-diarize",
+            file=audio_file,
+            response_format="json",
+            extra_body={
+                "response_format": "diarized_json",
+                "chunking_strategy": "auto",
+                "known_speaker_names": known_speaker_names,
+                "known_speaker_references": known_speaker_references,
+            },
+        )
 
-    prompt = """
-    Analyze this audio clip recorded during a family trip.
+    # Returns {"transcript": [{"timestamp": "00:05", "speaker": "Anne", "text": "..."}]}
+```
 
-    Respond in this exact JSON format:
-    {
-      "audioType": "speech" or "ambient" or "mixed" or "music" or "silent",
-      "transcript": [
-        {"timestamp": "MM:SS", "speaker": "Child" or "Adult Female" or "Adult Male", "text": "what they said"}
-      ],
-      "audioEvents": [
-        {"timestamp": "MM:SS", "description": "description of non-speech sound"}
-      ],
-      "sceneDescription": "1-2 sentences describing what's happening",
-      "emotionalTone": "the mood (e.g., excited, peaceful, chaotic, tender)"
+### analyze_audio() - Gemini
+
+Analyzes audio for scene understanding (no transcript):
+
+```python
+from google import genai
+
+def analyze_audio(audio_path: str, api_key: str, context: dict = None) -> dict:
+    """
+    Analyze audio using Gemini.
+    Returns: audioType, audioEvents, sceneDescription, emotionalTone
+    (Transcript is handled separately by OpenAI)
+    """
+    client = genai.Client(api_key=api_key)
+
+    # Upload and analyze
+    uploaded_file = client.files.upload(file=audio_file)
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=[uploaded_file, prompt]
+    )
+
+    # Returns {"audioType": "speech", "audioEvents": [...], ...}
+```
+
+### process_single_clip() - Orchestrator
+
+Combines both APIs for each clip:
+
+```python
+def process_single_clip(clip, audio_path, context, api_keys, voice_references, ...):
+    # Step 1: Transcribe with OpenAI (speaker diarization)
+    if voice_references:
+        transcription = transcribe_with_diarization(audio_path, voice_references, api_keys.openai)
+    else:
+        transcription = transcribe_without_diarization(audio_path, api_keys.openai)
+
+    # Step 2: Analyze with Gemini (scene understanding)
+    analysis = analyze_audio(str(audio_path), api_keys.gemini, context=context)
+
+    # Step 3: Merge results
+    clip["analysis"] = {
+        "audioType": analysis["audioType"],
+        "transcript": transcription["transcript"],  # From OpenAI
+        "audioEvents": analysis["audioEvents"],
+        "sceneDescription": analysis["sceneDescription"],
+        "emotionalTone": analysis["emotionalTone"],
     }
-
-    Rules:
-    - For audioType: choose the primary type
-    - For transcript: include timestamps in MM:SS format, identify speakers as Child/Adult Female/Adult Male
-    - For audioEvents: note significant non-speech sounds (water, wind, laughter, music, etc.) with timestamps
-    - If no speech, transcript should be an empty array []
-    - If no notable audio events, audioEvents should be an empty array []
-
-    Return ONLY valid JSON, no other text.
-    """
-
-    response = model.generate_content([audio_file, prompt])
-
-    # Parse JSON response
-    import json
-    result = json.loads(response.text)
-
-    return result
 ```
 
 ## Pipeline Steps
@@ -420,14 +496,15 @@ def analyze_audio(audio_path: str, api_key: str) -> dict:
    ├── Build story beats lookup by ID
    └── Load per-traveler voice references
 
-3. UPLOAD VOICE REFERENCES (once)
-   └── Upload each traveler's voice reference file to Gemini
+3. LOAD VOICE REFERENCES (once)
+   └── Encode each traveler's voice reference as base64 data URL for OpenAI
 
 4. FOR EACH CLIP:
    ├── Print progress: "Processing clip 1/10: audio/clip_001.webm"
    ├── Build context (travelers, location, story beat)
-   ├── Upload audio to Gemini
-   ├── Call analyze_audio() with voice references
+   ├── Call OpenAI transcribe_with_diarization() with voice references
+   ├── Call Gemini analyze_audio() for scene analysis
+   ├── Merge transcript (OpenAI) with analysis (Gemini)
    ├── Resolve story beat ID to full object
    └── Add results to clip metadata
 
@@ -459,11 +536,20 @@ uv run python process.py /path/to/export.zip
 
 ## Cost Estimates
 
-Gemini 2.5 Flash pricing is very low:
-- ~$0.001 per audio clip (30 seconds average)
-- 50 clips = ~$0.05 total
+The hybrid pipeline uses both OpenAI and Gemini APIs:
 
-Free tier: 15 requests per minute, 1 million tokens per day (more than enough)
+**OpenAI (Transcription):**
+- gpt-4o-transcribe-diarize: ~$0.006/min
+- 30 second clip = ~$0.003
+- 50 clips = ~$0.15
+
+**Gemini (Analysis):**
+- Gemini 3 Flash: ~$0.001 per clip
+- 50 clips = ~$0.05
+
+**Total estimate:** ~$0.20 for 50 clips (30 seconds average)
+
+Note: Voice references are encoded as base64 and sent with each transcription request, which may slightly increase costs.
 
 ## Development Steps
 

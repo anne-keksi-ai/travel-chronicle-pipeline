@@ -66,19 +66,30 @@ def sample_metadata():
 
 @pytest.fixture
 def sample_gemini_response():
-    """Sample Gemini API response for audio analysis."""
+    """Sample Gemini API response for audio analysis (non-transcript fields)."""
     return {
         "audioType": "speech",
-        "transcript": [
-            {"timestamp": "00:00", "speaker": "Alice", "text": "Look at that!"},
-            {"timestamp": "00:03", "speaker": "Mom", "text": "It's beautiful!"},
-        ],
         "audioEvents": [
             {"timestamp": "00:01", "event": "wind blowing"},
             {"timestamp": "00:05", "event": "car passing by"},
         ],
         "sceneDescription": "Family viewing the Golden Gate Bridge on a windy day.",
         "emotionalTone": "excited",
+    }
+
+
+@pytest.fixture
+def sample_openai_transcription():
+    """Sample OpenAI transcription response."""
+    return {
+        "transcript": [
+            {"timestamp": "00:00", "speaker": "Alice", "text": "Look at that!"},
+            {"timestamp": "00:03", "speaker": "Mom", "text": "It's beautiful!"},
+        ],
+        "_meta": {
+            "model": "gpt-4o-transcribe-diarize",
+            "voice_references": [],
+        },
     }
 
 
